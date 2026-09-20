@@ -1,4 +1,5 @@
 #include "mixer.hpp"
+#include "hotreload.hpp"
 #include "raylib.h"
 #include "rlgl.h"
 #include <GL/gl.h>
@@ -14,9 +15,29 @@ static Mixer* audioMixer=nullptr;
 static volatile std::sig_atomic_t interrupted=0;
 static void audioCallback(void* output,unsigned frames) { audioMixer->render(static_cast<float*>(output),frames); }
 static void onSignal(int) {interrupted=1;}
-static const std::array<Color,TrackCount> Colors={Color{175,149,246,255},Color{116,222,239,255},Color{147,180,206,255},
-    Color{113,213,179,255},Color{239,187,119,255},Color{227,143,167,255},Color{214,210,149,255}};
-static const std::array<const char*,TrackCount> Roles={"ATMOSPHERE","MELODY","TEXTURE","LOW END","PULSE","BACKBEAT","MOVEMENT"};
+// Colours and role labels live in assets/layers.conf and reload while running.
+static LayerConfig layers;
+static std::array<Color,TrackCount> Colors{};
+static int configReloads=0,shaderReloads=0;
+static std::string reloadError;
+static void applyLayers() {
+    for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
+}
+// Keeps the previous shader when a save does not compile, so a typo in a live
+// session cannot take down the window or the audio with it.
+static bool reloadShader(Shader& shader,int& resLoc,int& timeLoc,int& energyLoc,const fs::path& path,std::string& note) {
+    Shader next=LoadShader(nullptr,path.c_str());
+    if(!IsShaderValid(next)||next.id==rlGetShaderIdDefault()) {
+        UnloadShader(next);   // raylib guards the default program; this only frees locs
+        note="space.fs did not compile - keeping the previous shader";
+        return false;
+    }
+    UnloadShader(shader);shader=next;
+    resLoc=GetShaderLocation(shader,"resolution");
+    timeLoc=GetShaderLocation(shader,"time");
+    energyLoc=GetShaderLocation(shader,"energy");
+    note.clear();return true;
+}
 
 struct Options {
     fs::path assets=fs::canonical("/proc/self/exe").parent_path().parent_path()/"assets";
@@ -48,14 +69,17 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.1.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.2.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
        <<",\"audio_ready\":"<<((running&&IsAudioDeviceReady())?"true":"false")<<",\"playing\":"<<(mixer.playing?"true":"false")
        <<",\"sample_rate\":48000,\"loop_frames\":"<<mixer.frames<<",\"position_frames\":"<<mixer.position.load()
        <<",\"rendered_frames\":"<<mixer.renderedFrames.load()<<",\"output_rms\":"<<mixer.outputRms.load()
-       <<",\"volume\":"<<mixer.volume.load()<<",\"tracks\":[";
+       <<",\"volume\":"<<mixer.volume.load()
+       <<",\"hot_reload\":{\"config_reloads\":"<<configReloads<<",\"shader_reloads\":"<<shaderReloads
+       <<",\"last_error\":"<<quote(reloadError)<<"}"
+       <<",\"tracks\":[";
     uint32_t mask=mixer.enabled;
     for(int i=0;i<TrackCount;++i) {
         if(i)out<<',';
@@ -82,7 +106,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.1.0\nDefault: fullscreen. Click cards/orbs or 1-7 toggle tracks.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.2.0\nDefault: fullscreen. Click cards/orbs or 1-7 toggle tracks.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -118,6 +142,8 @@ int main(int argc,char** argv) {
         std::cout<<"[graphics] "<<gpu<<" / "<<glString(GL_VERSION)<<std::endl;
         if(!fs::exists(options.assets/"font.ttf")||!fs::exists(options.assets/"space.fs"))
             throw std::runtime_error("Missing graphics assets; run python3 scripts/setup.py");
+        layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
+        if(!layers.note.empty())std::cout<<"[config] "<<layers.note<<std::endl;
         Font font=LoadFontEx((options.assets/"font.ttf").c_str(),72,nullptr,0);
         if(!IsFontValid(font))throw std::runtime_error("Cannot load UI font");
         GenTextureMipmaps(&font.texture);
@@ -125,6 +151,9 @@ int main(int argc,char** argv) {
         Shader shader=LoadShader(nullptr,(options.assets/"space.fs").c_str());
         if(!IsShaderValid(shader)||shader.id==rlGetShaderIdDefault())throw std::runtime_error("Space shader failed to compile");
         int resLoc=GetShaderLocation(shader,"resolution"),timeLoc=GetShaderLocation(shader,"time"),energyLoc=GetShaderLocation(shader,"energy");
+        Watched shaderWatch{options.assets/"space.fs"},configWatch{options.assets/"layers.conf"};
+        shaderWatch.prime();configWatch.prime();
+        std::cout<<"[reload] watching space.fs and layers.conf; saves apply live"<<std::endl;
         RenderTexture2D background=LoadRenderTexture(960,540);
         SetTextureFilter(background.texture,TEXTURE_FILTER_BILINEAR);
         InitAudioDevice();audioReady=true;
@@ -141,15 +170,39 @@ int main(int argc,char** argv) {
             waves[i][j]=std::min(1.f,float(std::sqrt(sum/512))*9);
         }
         struct Star {float x,y,r,phase;};std::vector<Star> stars;
-        SetRandomSeed(7201);
-        for(int i=0;i<260;++i)stars.push_back({GetRandomValue(0,10000)/10000.f,GetRandomValue(0,10000)/10000.f,
-            GetRandomValue(3,14)/10.f,GetRandomValue(0,100)/10.f});
+        auto makeStars=[&]{
+            stars.clear();SetRandomSeed(7201);
+            for(int i=0;i<layers.starCount;++i)stars.push_back({GetRandomValue(0,10000)/10000.f,GetRandomValue(0,10000)/10000.f,
+                GetRandomValue(3,14)/10.f,GetRandomValue(0,100)/10.f});
+        };
+        makeStars();
         std::array<float,TrackCount> visibility{},meter{};visibility.fill(1);
-        double started=GetTime(),lastState=-1;
+        double started=GetTime(),lastState=-1,toastAt=-9;
         bool captured=false;
+        long frame=0;
+        std::string toast;
         while(!WindowShouldClose()&&!interrupted) {
             double elapsed=GetTime()-started;
             if(options.seconds>0&&elapsed>=options.seconds)break;
+            // Data reload only. The mixer, the stems and the playhead are never
+            // rebuilt here, so playback continues straight through a reload.
+            if(++frame%8==0) {
+                if(shaderWatch.changed()) {
+                    std::string note;
+                    if(reloadShader(shader,resLoc,timeLoc,energyLoc,options.assets/"space.fs",note)) {
+                        ++shaderReloads;toast="space.fs reloaded";reloadError.clear();
+                    } else {toast=note;reloadError=note;}
+                    toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
+                }
+                if(configWatch.changed()) {
+                    int previousStars=layers.starCount;
+                    layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
+                    if(layers.starCount!=previousStars)makeStars();
+                    ++configReloads;reloadError=layers.note;
+                    toast=layers.note.empty()?"layers.conf reloaded":"layers.conf: "+layers.note;
+                    toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
+                }
+            }
             float w=float(GetScreenWidth()),h=float(GetScreenHeight()),u=std::min(w/1600.f,h/900.f);
             float margin=52*u, gap=12*u,cardWidth=(w-margin*2-gap*6)/7,cardY=h-169*u,cardH=112*u;
             Vector2 center{w*.5f,h*.435f};float radius=std::min(w*.31f,h*.34f);
@@ -162,7 +215,7 @@ int main(int argc,char** argv) {
             std::array<Rectangle,TrackCount> cards{};
             int hovered=-1;
             for(int i=0;i<TrackCount;++i) {
-                float orbit=radius*(.43f+i*.092f);
+                float orbit=radius*(layers.orbitBase+i*layers.orbitStep);
                 float angle=motion*(.055f+i*.009f)+float(i)*2.39996f;
                 nodes[i]={center.x+std::cos(angle)*orbit,center.y+std::sin(angle)*orbit*.56f};
                 cards[i]={margin+i*(cardWidth+gap),cardY,cardWidth,cardH};
@@ -194,7 +247,7 @@ int main(int argc,char** argv) {
                 visibility[i]+=(float(bool(mask&(1u<<i)))-visibility[i])*(1-std::exp(-dt*7));
                 meter[i]+=(mixer.levels[i].load()*6-meter[i])*(1-std::exp(-dt*13));
             }
-            float energy=std::min(1.f,mixer.outputRms.load()*7);
+            float energy=std::min(1.f,mixer.outputRms.load()*layers.energyGain);
             Vector2 resolution{float(background.texture.width),float(background.texture.height)};
             SetShaderValue(shader,resLoc,&resolution,SHADER_UNIFORM_VEC2);
             SetShaderValue(shader,timeLoc,&motion,SHADER_UNIFORM_FLOAT);
@@ -217,7 +270,7 @@ int main(int argc,char** argv) {
             for(int i=0;i<4;++i)DrawCircleV({w-margin-196*u+i*22*u,106*u},3*u,Fade({124,235,210,255},int(beat)%4==i&&mixer.playing?.95f:.18f));
             // Every track has a visible orbit, even while silent, so re-entry is discoverable.
             for(int i=0;i<TrackCount;++i) {
-                float orbit=radius*(.43f+i*.092f);
+                float orbit=radius*(layers.orbitBase+i*layers.orbitStep);
                 Color c=Colors[i];
                 for(int j=0;j<160;++j) {
                     float a=j*2*PI/160,b=(j+1)*2*PI/160;
@@ -226,7 +279,7 @@ int main(int argc,char** argv) {
                 }
                 float strength=.2f+visibility[i]*.8f;
                 DrawLineEx(center,nodes[i],u,Fade(c,(.015f+meter[i]*.045f)*visibility[i]));
-                glow(nodes[i],(6+meter[i]*13)*u,c,strength*.8f);
+                glow(nodes[i],(6+meter[i]*13)*u*layers.glowScale,c,strength*.8f);
                 DrawCircleLinesV(nodes[i],(15+(hovered==i?4:0))*u,Fade(c,.2f+visibility[i]*.5f));
                 centered(font,std::to_string(i+1),nodes[i].x,nodes[i].y-5*u,10*u,{235,245,255,255});
                 if(hovered==i)centered(font,Names[i],nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
@@ -258,7 +311,7 @@ int main(int argc,char** argv) {
                 float size=17*u;
                 while(MeasureTextEx(font,Names[i],size,.5f).x>r.width-26*u)size-=u;
                 text(font,Names[i],r.x+13*u,r.y+36*u,size,Fade({226,235,241,255},.4f+.6f*v));
-                text(font,Roles[i],r.x+13*u,r.y+62*u,9*u,Fade(c,.35f+.45f*v));
+                text(font,layers.roles[i],r.x+13*u,r.y+62*u,9*u,Fade(c,.35f+.45f*v));
                 for(int j=0;j<80;++j) {
                     float x=r.x+13*u+j*(r.width-26*u)/80;
                     float a=(2+waves[i][j]*12)*u*(.28f+.72f*v);
@@ -272,6 +325,10 @@ int main(int argc,char** argv) {
                 text(font,label,r.x+7*u,r.y+5*u,12*u,{166,191,202,255});
             };
             button(pauseButton,mixer.playing?"II  PAUSE":">  PLAY");button(allButton,"ALL ON");button(silenceButton,"ALL OFF");
+            if(elapsed-toastAt<2.6) {
+                float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);
+                centered(font,toast,w*.5f,30*u,12*u,Fade(reloadError.empty()?Color{124,235,210,255}:Color{240,172,138,255},alpha));
+            }
             centered(font,"1-7  TRACKS    SPACE  PAUSE    F11  FULLSCREEN    ESC  EXIT",w*.5f,h-32*u,10*u,{106,137,155,255});
             text(font,"VOLUME",volumeBar.x-66*u,h-32*u,10*u,{143,168,183,255});
             DrawRectangleRec(volumeBar,{46,67,80,255});

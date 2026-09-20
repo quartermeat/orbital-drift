@@ -152,6 +152,11 @@ Still open, in order:
 
 Only after 4 is it worth asking what the first actual puzzle is.
 
+Data hot reload is in: `space.fs` and `layers.conf` re-read on save while the
+music keeps playing, so layer tuning is a save-and-look loop rather than a
+restart. Code hot reload (a reloadable `.so`) is sketched in `AGENTS.md` and
+worth doing once there is real layer code to reload.
+
 See `AGENTS.md` for the invariants an implementing agent must not regress.
 
 ## Open questions
