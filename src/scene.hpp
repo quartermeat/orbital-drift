@@ -105,6 +105,10 @@ struct Patch { std::vector<Blob> blobs; };
 struct Field { float x, y, w, h, spin; unsigned char tone; int furrows; };
 struct Road { std::vector<std::pair<float, float>> points; };
 struct Marker { float x, y, size; unsigned char palette; bool beacon; };
+// People are placed here but drawn live rather than baked into the texture, so
+// they stay sharp as you zoom instead of turning into magnified texels. Only
+// the seed is stored; what the person looks like is rolled from it at draw time.
+struct PersonSpot { float x, y, height; uint32_t seed; };
 
 struct Scene {
     uint64_t seed = 0;
@@ -115,6 +119,7 @@ struct Scene {
     std::vector<Field> fields;
     std::vector<Road> roads;
     std::vector<Marker> markers;
+    std::vector<PersonSpot> people;
     int beacon = -1;
     bool found = false;
 };
@@ -244,6 +249,46 @@ inline Scene generateScene(int track, Rgb trackColor) {
         scene.markers.push_back({x, y, rng.range(15.f, 23.f),
                                  static_cast<unsigned char>(1 + rng.below(PaletteSize - 1)), false});
     }
+    // People: crowded in the towns, strung along the roads, scattered over the
+    // fields and the shoreline. At a person's real size they are specks until
+    // you zoom, which is what makes zooming worth doing.
+    auto addPerson = [&](float x, float y) {
+        if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
+        scene.people.push_back({x, y, rng.range(11.f, 16.f), rng.next()});
+    };
+    for (const Town& town : scene.towns) {
+        int count = 26 + rng.below(38);
+        for (int i = 0; i < count; ++i) {
+            float angle = rng.range(0, 6.2831853f), reach = town.radius * 1.15f * std::sqrt(rng.unit());
+            addPerson(town.x + std::cos(angle) * reach, town.y + std::sin(angle) * reach);
+        }
+    }
+    for (const Road& road : scene.roads) {
+        int count = 5 + rng.below(13);
+        for (int i = 0; i < count; ++i) {
+            float t = rng.unit() * float(road.points.size() - 1);
+            size_t at = size_t(t);
+            float f = t - float(at);
+            const auto& a = road.points[at];
+            const auto& b = road.points[std::min(at + 1, road.points.size() - 1)];
+            addPerson(a.first + (b.first - a.first) * f + rng.range(-16.f, 16.f),
+                      a.second + (b.second - a.second) * f + rng.range(-16.f, 16.f));
+        }
+    }
+    for (const Field& field : scene.fields) {
+        int count = rng.below(4);
+        for (int i = 0; i < count; ++i)
+            addPerson(field.x + rng.range(-.45f, .45f) * field.w, field.y + rng.range(-.45f, .45f) * field.h);
+    }
+    for (int i = 0; i < 260; ++i) {
+        float x = rng.range(0, float(SceneWidth)), y = rng.range(0, float(SceneHeight));
+        float height = elevationAt(scene.seed, x, y);
+        if (height > ShoreLevel - .03f && height < ShoreLevel + .05f) addPerson(x, y);   // the shoreline
+    }
+    // Painter's order: someone lower on the map stands in front.
+    std::sort(scene.people.begin(), scene.people.end(),
+              [](const PersonSpot& a, const PersonSpot& b) { return a.y < b.y; });
+
     if (!scene.markers.empty()) {
         scene.beacon = rng.below(int(scene.markers.size()));
         scene.markers[size_t(scene.beacon)].palette = BeaconPalette;

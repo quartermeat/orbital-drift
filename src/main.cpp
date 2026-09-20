@@ -1,7 +1,7 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
 #include "progress.hpp"
-#include "scene.hpp"
+#include "figure.hpp"   // brings in scene.hpp
 #include "raylib.h"
 #include "raymath.h"   // must follow raylib.h: it uses raylib's vector types
 #include "rlgl.h"
@@ -34,80 +34,38 @@ static bool beaconOnScreen=false,beaconFound=false;
 static float beaconX=0,beaconY=0;
 static double zoomLevel=1,viewCenterX=0,viewCenterY=0,beaconWorldX=0,beaconWorldY=0;
 
-// Draws a generated place into an offscreen texture. Done once per world, then
-// the view is only ever panning and zooming an image.
-static RenderTexture2D bakeScene(const Scene& scene) {
-    auto rgb=[](Rgb c,float alpha=1.f){return Fade(Color{c.r,c.g,c.b,255},alpha);};
-    RenderTexture2D sheet=LoadRenderTexture(SceneWidth,SceneHeight);
-    BeginTextureMode(sheet);
-    ClearBackground(rgb(scene.sea));
-    // Terrain in cells, cheap and soft enough at this scale.
-    constexpr int Cell=5;
-    for(int y=0;y<SceneHeight;y+=Cell)
-        for(int x=0;x<SceneWidth;x+=Cell) {
-            float cx=float(x)+Cell*.5f,cy=float(y)+Cell*.5f;
-            float height=elevationAt(scene.seed,cx,cy),damp=moistureAt(scene.seed,cx,cy);
+// Only the terrain is baked, and per pixel rather than in cells so it stays
+// soft when magnified. Everything with a hard edge -- buildings, trees, fields,
+// roads, markers, people -- is drawn live at the current zoom, which is the
+// only way it stays sharp when you zoom in.
+inline constexpr int TerrainWidth = 1280, TerrainHeight = 720;
+
+static Texture2D bakeTerrain(const Scene& scene) {
+    Image canvas = GenImageColor(TerrainWidth, TerrainHeight, BLACK);
+    auto rgb = [](Rgb c) { return Color{c.r, c.g, c.b, 255}; };
+    for (int y = 0; y < TerrainHeight; ++y)
+        for (int x = 0; x < TerrainWidth; ++x) {
+            float sx = (float(x) + .5f) * SceneWidth / TerrainWidth;
+            float sy = (float(y) + .5f) * SceneHeight / TerrainHeight;
+            float height = elevationAt(scene.seed, sx, sy), damp = moistureAt(scene.seed, sx, sy);
             Color tone;
-            if(height<SeaLevel)            tone=rgb(scene.sea);
-            else if(height<ShoreLevel)     tone=rgb(scene.shallow);
-            else if(height<ShoreLevel+.03f)tone=rgb(scene.sand);
-            else if(height>HighLevel)      tone=rgb(scene.highland);
-            else {
-                Rgb blended=shade(scene.grass,1.f,std::clamp((damp-.42f)*1.5f,0.f,.55f),scene.forest);
-                tone=rgb(blended);
-            }
-            // A little per-cell variation so flat areas are not dead colour.
-            float grain=.93f+.14f*hashNoise(x/Cell,y/Cell,scene.seed);
-            tone=Color{(unsigned char)std::clamp(tone.r*grain,0.f,255.f),
-                       (unsigned char)std::clamp(tone.g*grain,0.f,255.f),
-                       (unsigned char)std::clamp(tone.b*grain,0.f,255.f),255};
-            DrawRectangle(x,y,Cell,Cell,tone);
+            if (height < SeaLevel)             tone = rgb(scene.sea);
+            else if (height < ShoreLevel)      tone = rgb(scene.shallow);
+            else if (height < ShoreLevel + .03f) tone = rgb(scene.sand);
+            else if (height > HighLevel)       tone = rgb(scene.highland);
+            else tone = rgb(shade(scene.grass, 1.f, std::clamp((damp - .42f) * 1.5f, 0.f, .55f), scene.forest));
+            float grain = .94f + .12f * hashNoise(x, y, scene.seed);
+            ImageDrawPixel(&canvas, x, y,
+                           Color{(unsigned char)std::clamp(tone.r * grain, 0.f, 255.f),
+                                 (unsigned char)std::clamp(tone.g * grain, 0.f, 255.f),
+                                 (unsigned char)std::clamp(tone.b * grain, 0.f, 255.f), 255});
         }
-    for(const Field& field:scene.fields) {
-        Rgb tint=scene.palette[field.tone];
-        Rectangle box{field.x,field.y,field.w,field.h};
-        Vector2 origin{field.w*.5f,field.h*.5f};
-        float degrees=field.spin*RAD2DEG;
-        DrawRectanglePro(box,origin,degrees,rgb(tint,.42f));
-        for(int i=1;i<field.furrows;++i) {
-            float t=float(i)/float(field.furrows);
-            DrawRectanglePro({field.x,field.y-field.h*.5f+field.h*t,field.w,1.6f},
-                             {field.w*.5f,0},degrees,rgb(shade(tint,.7f,.2f,{20,26,20}),.4f));
-        }
-    }
-    for(const Patch& patch:scene.woods)
-        for(const Blob& blob:patch.blobs) {
-            Rgb tone=shade(scene.forest,.78f+.16f*float(blob.tone),.06f,{16,30,22});
-            DrawCircleV({blob.x,blob.y+blob.r*.22f},blob.r,rgb(shade(tone,.55f,.2f,{10,18,14}),.5f));
-            DrawCircleV({blob.x,blob.y},blob.r,rgb(tone));
-        }
-    for(const Road& road:scene.roads)
-        for(size_t i=1;i<road.points.size();++i) {
-            Vector2 a{road.points[i-1].first,road.points[i-1].second},b{road.points[i].first,road.points[i].second};
-            DrawLineEx(a,b,11,rgb(shade(scene.sand,.62f,.3f,{60,52,40}),.85f));
-            DrawLineEx(a,b,6.5f,rgb(shade(scene.sand,1.08f,.1f,{240,230,205}),.95f));
-        }
-    for(const Town& town:scene.towns) {
-        DrawCircleV({town.x,town.y},town.radius*1.25f,rgb(shade(scene.sand,.9f,.35f,{170,160,140}),.20f));
-        for(const Building& building:town.buildings) {
-            Rectangle box{building.x,building.y,building.w,building.h};
-            Vector2 origin{building.w*.5f,building.h*.5f};
-            float degrees=building.spin*RAD2DEG;
-            DrawRectanglePro({box.x+3,box.y+4,box.width,box.height},origin,degrees,rgb({12,16,22},.28f));
-            DrawRectanglePro(box,origin,degrees,rgb(shade(scene.palette[building.roof],1.f,.34f,{238,236,228})));
-            DrawRectanglePro({box.x,box.y,box.width,box.height*.55f},origin,degrees,
-                             rgb(scene.palette[building.roof]));
-        }
-    }
-    for(const Marker& marker:scene.markers) {
-        Vector2 at{marker.x,marker.y};
-        DrawCircleV({at.x,at.y+marker.size*.34f},marker.size*.66f,rgb({10,14,20},.30f));
-        DrawPoly(at,3,marker.size,-90,rgb(scene.palette[marker.palette]));
-        DrawPolyLines(at,3,marker.size,-90,rgb(shade(scene.palette[marker.palette],.5f,.25f,{12,18,26}),.8f));
-    }
-    EndTextureMode();
-    return sheet;
+    Texture2D texture = LoadTextureFromImage(canvas);
+    SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
+    UnloadImage(canvas);
+    return texture;
 }
+
 static void applyLayers() {
     for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
 }
@@ -160,7 +118,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.8.1\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.9.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -213,7 +171,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.8.1\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.9.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --world N --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -267,13 +225,12 @@ int main(int argc,char** argv) {
         if(!IsShaderValid(shader)||shader.id==rlGetShaderIdDefault())throw std::runtime_error("Space shader failed to compile");
         int resLoc=GetShaderLocation(shader,"resolution"),timeLoc=GetShaderLocation(shader,"time"),energyLoc=GetShaderLocation(shader,"energy");
         std::array<Scene,TrackCount> scenes{};
-        std::array<RenderTexture2D,TrackCount> sheets{};
+        std::array<Texture2D,TrackCount> sheets{};
         std::array<bool,TrackCount> baked{};
-        auto worldSheet=[&](int track)->RenderTexture2D&{
+        auto worldSheet=[&](int track)->Texture2D&{
             if(!baked[size_t(track)]) {
                 scenes[size_t(track)]=generateScene(track,layers.colors[size_t(track)]);
-                sheets[size_t(track)]=bakeScene(scenes[size_t(track)]);
-                SetTextureFilter(sheets[size_t(track)].texture,TEXTURE_FILTER_BILINEAR);
+                sheets[size_t(track)]=bakeTerrain(scenes[size_t(track)]);
                 baked[size_t(track)]=true;
                 std::cout<<"[world] baked "<<Names[track]<<std::endl;
             }
@@ -337,7 +294,7 @@ int main(int argc,char** argv) {
                     int previousStars=layers.starCount;
                     layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
                     if(layers.starCount!=previousStars)makeStars();
-                    for(int i=0;i<TrackCount;++i)if(baked[i]){UnloadRenderTexture(sheets[i]);baked[i]=false;}
+                    for(int i=0;i<TrackCount;++i)if(baked[i]){UnloadTexture(sheets[i]);baked[i]=false;}
                     ++configReloads;reloadError=layers.note;
                     toast=layers.note.empty()?"layers.conf reloaded":"layers.conf: "+layers.note;
                     toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
@@ -347,7 +304,7 @@ int main(int argc,char** argv) {
             // ---------- world view: pan and zoom the planet's background image ----------
             if(view==View::Planet) {
                 Scene& scene=scenes[size_t(planetTrack)];
-                RenderTexture2D& sheet=worldSheet(planetTrack);
+                Texture2D& sheet=worldSheet(planetTrack);
                 float step=std::min(GetFrameTime(),.1f);
                 bool leaving=IsKeyPressed(KEY_ESCAPE)||IsKeyPressed(KEY_BACKSPACE);
                 if(options.gallery)
@@ -413,10 +370,88 @@ int main(int argc,char** argv) {
 
                 Color edge{6,10,17,255};
                 BeginDrawing();ClearBackground(edge);
-                Rectangle source{0,0,float(SceneWidth),-float(SceneHeight)};   // render textures are y-flipped
+                Rectangle source{0,0,float(TerrainWidth),float(TerrainHeight)};
                 Rectangle dest{float(screenX(0)),float(screenY(0)),
                                float(SceneWidth*viewScale),float(SceneHeight*viewScale)};
-                DrawTexturePro(sheet.texture,source,dest,{0,0},0,WHITE);
+                DrawTexturePro(sheet,source,dest,{0,0},0,WHITE);
+                // Everything with a hard edge is drawn at the current zoom so it
+                // stays sharp however far in you go.
+                auto tint=[&](Rgb c,float alpha=1.f){return Fade(Color{c.r,c.g,c.b,255},alpha);};
+                auto onScreen=[&](double x,double y,double pad){
+                    double sx=screenX(x),sy=screenY(y);
+                    return sx>-pad&&sy>-pad&&sx<w+pad&&sy<h+pad;
+                };
+                float z=float(viewScale);
+                for(const Field& field:scene.fields) {
+                    if(!onScreen(field.x,field.y,(field.w+field.h)*viewScale))continue;
+                    Rgb shadeOf=scene.palette[field.tone];
+                    float degrees=field.spin*RAD2DEG;
+                    Vector2 at{float(screenX(field.x)),float(screenY(field.y))};
+                    DrawRectanglePro({at.x,at.y,field.w*z,field.h*z},{field.w*z*.5f,field.h*z*.5f},
+                                     degrees,tint(shadeOf,.42f));
+                    for(int i=1;i<field.furrows;++i) {
+                        float t=float(i)/float(field.furrows);
+                        DrawRectanglePro({at.x,at.y-field.h*z*.5f+field.h*z*t,field.w*z,std::max(1.f,1.6f*z)},
+                                         {field.w*z*.5f,0},degrees,tint(shade(shadeOf,.7f,.2f,{20,26,20}),.4f));
+                    }
+                }
+                for(const Patch& patch:scene.woods)
+                    for(const Blob& blob:patch.blobs) {
+                        float radius=blob.r*z;
+                        if(!onScreen(blob.x,blob.y,radius+12))continue;
+                        Rgb tone=shade(scene.forest,.78f+.16f*float(blob.tone),.06f,{16,30,22});
+                        Vector2 at{float(screenX(blob.x)),float(screenY(blob.y))};
+                        // A small tree is a few pixels wide: its shadow is invisible
+                        // and a 36-sided circle is wasted. Both cost real frames.
+                        if(radius<6.f) { DrawPoly(at,7,std::max(1.f,radius),0,tint(tone)); continue; }
+                        DrawCircleV({at.x,at.y+radius*.22f},radius,tint(shade(tone,.55f,.2f,{10,18,14}),.5f));
+                        DrawCircleV(at,radius,tint(tone));
+                    }
+                for(const Road& road:scene.roads)
+                    for(size_t i=1;i<road.points.size();++i) {
+                        Vector2 a{float(screenX(road.points[i-1].first)),float(screenY(road.points[i-1].second))};
+                        Vector2 b{float(screenX(road.points[i].first)),float(screenY(road.points[i].second))};
+                        DrawLineEx(a,b,std::max(1.f,11*z),tint(shade(scene.sand,.62f,.3f,{60,52,40}),.85f));
+                        DrawLineEx(a,b,std::max(1.f,6.5f*z),tint(shade(scene.sand,1.08f,.1f,{240,230,205}),.95f));
+                    }
+                for(const Town& town:scene.towns) {
+                    if(!onScreen(town.x,town.y,town.radius*viewScale*1.6+40))continue;
+                    DrawCircleV({float(screenX(town.x)),float(screenY(town.y))},town.radius*1.25f*z,
+                                tint(shade(scene.sand,.9f,.35f,{170,160,140}),.20f));
+                    for(const Building& building:town.buildings) {
+                        Vector2 at{float(screenX(building.x)),float(screenY(building.y))};
+                        float bw=building.w*z,bh=building.h*z,degrees=building.spin*RAD2DEG;
+                        DrawRectanglePro({at.x+3*z,at.y+4*z,bw,bh},{bw*.5f,bh*.5f},degrees,tint({12,16,22},.28f));
+                        DrawRectanglePro({at.x,at.y,bw,bh},{bw*.5f,bh*.5f},degrees,
+                                         tint(shade(scene.palette[building.roof],1.f,.34f,{238,236,228})));
+                        DrawRectanglePro({at.x,at.y,bw,bh*.55f},{bw*.5f,bh*.5f},degrees,
+                                         tint(scene.palette[building.roof]));
+                    }
+                }
+                for(const Marker& marker:scene.markers) {
+                    if(!onScreen(marker.x,marker.y,marker.size*viewScale+24))continue;
+                    Vector2 at{float(screenX(marker.x)),float(screenY(marker.y))};
+                    DrawCircleV({at.x,at.y+marker.size*z*.34f},marker.size*z*.66f,tint({10,14,20},.30f));
+                    DrawPoly(at,3,marker.size*z,-90,tint(scene.palette[marker.palette]));
+                    DrawPolyLines(at,3,marker.size*z,-90,tint(shade(scene.palette[marker.palette],.5f,.25f,{12,18,26}),.8f));
+                }
+                int drawnPeople=0;
+                for(const PersonSpot& spot:scene.people) {
+                    float px=float(spot.height*viewScale);
+                    if(px<1.1f)continue;
+                    double sx=screenX(spot.x),sy=screenY(spot.y);
+                    if(sx<-px*2||sy<-px*2||sx>w+px*2||sy>h+px*2)continue;
+                    ++drawnPeople;
+                    if(px<9.f) {    // below this a body is unreadable anyway: a mark will do
+                        Rng quick(spot.seed);
+                        Color tint=ClothTones[quick.below(ClothCount)];
+                        DrawRectangleRec({float(sx-px*.22),float(sy-px*.75),
+                                          std::max(1.f,px*.44f),std::max(1.f,px*.8f)},tint);
+                        continue;
+                    }
+                    Rng roll(spot.seed);
+                    drawFigure(rollFigure(roll),{float(sx),float(sy)},px);
+                }
 
                 float pad=38*u;
                 Rgb wantedRgb=scene.palette[BeaconPalette];
@@ -454,7 +489,8 @@ int main(int argc,char** argv) {
                 DrawRectangleLinesEx({boxX,boxY,boxW,boxH},std::max(1.f,u),Fade({214,240,232,255},.85f));
                 std::ostringstream zoomText;
                 zoomText<<"ZOOM  x"<<std::fixed<<std::setprecision(1)<<zoomLevel
-                        <<"    "<<scene.towns.size()<<" TOWNS    "<<scene.markers.size()<<" MARKERS";
+                        <<"    "<<scene.towns.size()<<" TOWNS    "<<scene.people.size()<<" PEOPLE    "
+                        <<drawnPeople<<" IN VIEW";
                 text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {
                     float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);
@@ -700,7 +736,7 @@ int main(int argc,char** argv) {
         writeState(options,mixer,gpu,vendor,false);
         StopAudioStream(stream);UnloadAudioStream(stream);streamReady=false;
         CloseAudioDevice();audioReady=false;audioMixer=nullptr;
-        for(int i=0;i<TrackCount;++i)if(baked[i])UnloadRenderTexture(sheets[i]);
+        for(int i=0;i<TrackCount;++i)if(baked[i])UnloadTexture(sheets[i]);
         UnloadRenderTexture(background);UnloadShader(shader);UnloadFont(font);CloseWindow();windowReady=false;
         return 0;
     } catch(const std::exception& error) {

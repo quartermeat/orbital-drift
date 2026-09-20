@@ -117,8 +117,15 @@ exist yet. The background is meant to still read at a distance.
 
 Rules:
 
-- **Worlds bake lazily and are cached.** Generating and drawing a scene is not
+- **Only the terrain is baked; everything with a hard edge is drawn live** at
+  the current zoom. Baking the buildings, trees and people turned them into
+  magnified mush the moment you zoomed in. The terrain is baked per pixel, not
+  in cells, or it shows as blocks.
+- **Worlds bake lazily and are cached.** Generating the terrain image is not
   free; do it on first visit, not at startup.
+- **Level of detail is what buys the frame rate.** Below ~9 px a person is
+  drawn as a single mark and below ~6 px a tree is a 7-sided poly with no
+  shadow. Without both, a populated world runs at 45 fps instead of 60.
 - **Nothing sits in the sea.** Towns, buildings, trees and markers are all
   rejected below `ShoreLevel`, which is what makes a scene read as a place.
 - **Generation is deterministic and raylib-free.** `scene.hpp` uses its own
