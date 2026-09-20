@@ -1,0 +1,6 @@
+/build/
+/artifacts/
+/assets/audio/
+/assets/font.ttf
+__pycache__/
+/windowed.png
