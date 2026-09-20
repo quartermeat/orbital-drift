@@ -22,11 +22,19 @@ working against it.
 Seven tracks, seven toggles, seven visual layers. State is a 7-bit word — 128
 combinations, of which a puzzle accepts some small number.
 
-**Decided: a run begins in silence and tracks unlock right to left.** Only
-track 7 is available; everything else is sealed. Switching a track on exposes
-its visual layer, and the layer carries a sigil — right-click it to unseal the
-track to its left. Exposure is the only condition: no timing, no rhythmic gate.
-The act of turning a layer on is what reveals what it hides.
+**Decided: a run begins in silence, tracks unlock right to left, and each
+track is a world.** Only track 7 is available; everything else is sealed.
+Switching a track on exposes its layer and marks its orbit with a sigil — click
+that to **descend** into the track's planet, a 3D globe you orbit and zoom like
+Google Earth, its surface crowded with props. Somewhere on it is the beacon:
+the one prop that is both a spire and wearing the track's own colour.
+Right-click it and the next track unseals.
+
+The conjunction is what makes it a search rather than a glance. Spires in other
+colours and other shapes in the track colour are everywhere, so neither half of
+the description narrows it down — the same trick that makes Waldo's stripes
+work in a crowd. The generator enforces exactly one true match and tops up
+decoys on both axes.
 
 That also means the run *starts* sparse and rhythmic and *ends* with the
 harmonic bed, so the world gains atmosphere as it fills in.

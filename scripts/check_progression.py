@@ -122,27 +122,23 @@ def main():
             if not read(STATE)['progress']['sigil_visible']:
                 failures.append('sigil did not come back when the track returned')
 
-            # Right click unseals; a left click must not.
+            # The sigil is a doorway now: clicking it descends to that world.
+            # Unsealing is earned on the planet, covered by check_planet.py.
             live = read(STATE)
             sigil_x, sigil_y = live['progress']['sigil_x'], live['progress']['sigil_y']
-            click(1)
-            time.sleep(1.0)
-            if read(STATE)['progress']['unlocked'] != 1:
-                failures.append('a left click unsealed a track; only right click should')
             print(f'sigil at ({sigil_x},{sigil_y}) in a {info["WIDTH"]}x{info["HEIGHT"]} window')
             click(3)
-            time.sleep(1.0)
+            time.sleep(1.4)
 
             after = read(STATE)
-            if after['progress']['unlocked'] != 2:
-                failures.append(f"after unseal unlocked was {after['progress']['unlocked']}, expected 2")
-            if after['progress']['frontier'] != 'Distant Snare':
-                failures.append(f"frontier did not move left: {after['progress']['frontier']}")
-            if not any(t['name'] == 'Distant Snare' and t['enabled'] for t in after['tracks']):
-                failures.append('the newly unsealed track did not start sounding')
+            if after['planet']['view'] != 'planet':
+                failures.append(f"clicking the sigil did not descend: view {after['planet']['view']}")
+            if after['planet']['track'] != 'Orbit Hats':
+                failures.append(f"descended to the wrong world: {after['planet']['track']}")
+            if after['progress']['unlocked'] != 1:
+                failures.append('the sigil unsealed a track directly; it should only open the world')
             if after['rendered_frames'] <= first['rendered_frames']:
-                failures.append('audio stalled across the unlock')
-            saved = json.loads(PROGRESS.read_text())
+                failures.append('audio stalled across the descent')
         finally:
             app.terminate()
             try:
@@ -183,15 +179,16 @@ def main():
             except subprocess.TimeoutExpired:
                 app.kill()
 
-    print(json.dumps({'unlocked_after_right_click': after['progress']['unlocked'],
-                      'frontier_after_right_click': after['progress']['frontier'],
+    print(json.dumps({'view_after_sigil_click': after['planet']['view'],
+                      'world_entered': after['planet']['track'],
+                      'unlocked_still': after['progress']['unlocked'],
                       'plain_relaunch': restarted['progress']['unlocked'],
                       'with_resume': resumed['progress']['unlocked']}, indent=2))
     if failures:
         for failure in failures:
             print(f'FAIL: {failure}', file=sys.stderr)
         return 1
-    print('PASS: silent start, sealed input refused, layer exposes sigil, right-click unseals, reset by default, --resume works')
+    print('PASS: silent start, sealed input refused, layer exposes sigil, sigil descends without unsealing, reset by default, --resume works')
     return 0
 
 

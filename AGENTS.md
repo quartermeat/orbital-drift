@@ -25,13 +25,17 @@ make run      # fullscreen
 
 python3 scripts/check_controls.py     # drives real input against a live window
 python3 scripts/check_hot_reload.py   # edits assets under a live session
-python3 scripts/check_progression.py  # right-clicks the sigil and checks the unlock
+python3 scripts/check_progression.py  # sigil opens the world without unsealing
+python3 scripts/check_planet.py       # descends, orbits, finds the beacon, screenshots it
 ```
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
-`--state f.json`, `--assets DIR`, `--check-assets`.
-Keys: `1`–`7` toggle, `Space` pause, `M` all off/on, `A` all on, `+`/`-` volume,
+`--capture-after N`, `--state f.json`, `--assets DIR`, `--check-assets`, `--resume`.
+System view: `1`–`7` toggle, click an orbit node to descend, `Z` drops into the
+frontier world, `Space` pause, `M` all off/on, `A` all on, `+`/`-` volume,
 `F11` fullscreen, `Esc` exit.
+Planet view: drag to orbit, wheel or `W`/`S` to zoom, arrows to turn,
+right-click the beacon, `Esc` back.
 
 ## Audio invariants — do not regress these
 
@@ -96,6 +100,46 @@ with Orbit Hats (swung eighths) and *ends* with Nebula Pad (the harmonic bed),
 so the world gains atmosphere as it fills in, inverting the usual build. If the
 intent was to begin with the pad, the order reverses and the sigil moves to the
 innermost orbit.
+
+## Planets
+
+Every track owns a world. Switching a track on lets you click its orbit node
+and **descend** into a 3D globe you orbit and zoom like Google Earth. The
+surface is a crowded Where's Waldo scene, and one prop on it is the beacon.
+Right-click the beacon to unseal the next track.
+
+**The search is a conjunction search, and that is the whole design.** The
+beacon is the only prop that is both a **spire** *and* wearing the **track's own
+colour**. Plenty of spires wear other colours, and plenty of other shapes wear
+the track colour, so neither feature alone narrows it down and the eye has to
+scan serially instead of popping straight to it. `generatePlanet` enforces
+this: exactly one prop carries both features, and it tops up decoys on both
+axes. Removing either guarantee turns the search into a pop-out and the game
+into nothing.
+
+Rules:
+
+- **The sigil is a doorway, not a shortcut.** Clicking the sigil in the system
+  view descends to that world; it must never unseal a track on its own. The
+  unseal is only ever earned by finding the beacon.
+- **Generation is deterministic and raylib-free.** `planet.hpp` uses its own
+  small PRNG because `std::uniform_*_distribution` is not specified to give the
+  same sequence across implementations, and a planet must be identical every
+  run and on every machine. Keeping raylib out of the header is what lets the
+  generator be unit-tested without a window.
+- **Props stand on the surface.** Cylinders, cones and hemispheres are
+  generated sitting on y=0; spheres, cubes and tori are centred and need the
+  `propLift` offset or they sink halfway into the globe.
+- **The far side is never drawn.** Props facing away from the camera are culled
+  by a dot product before the draw call — 2400 props per planet is only
+  affordable because roughly half are skipped.
+- **Terrain lives in the shader.** Continents, coastlines, relief and polar ice
+  come from value noise over the surface direction in `planet.fs`, so the
+  terrain is stable however the globe is turned and costs no geometry. The
+  `terrain` uniform switches that path on for the globe and off for the props,
+  and is set twice per frame rather than per prop.
+- **`raymath.h` must be included after `raylib.h`.** It uses raylib's vector
+  types and will not compile before it.
 
 ## Hot reload
 
@@ -165,7 +209,7 @@ layers, puzzles, or player state, extend that JSON in the same pass — an agent
 that cannot read the result cannot verify its own work. Keep `--check-assets`
 honest about anything newly required at load.
 
-## Current state (v0.4.0)
+## Current state (v0.5.0)
 
 First pass is working: fullscreen, hardware accelerated (verified on the
 RTX 3090 Ti), seven stems in sync, per-track toggles with metering.
@@ -186,11 +230,13 @@ Known gaps, roughly in order:
    stems from `~/Music/Orbital Drift` and hard-fails otherwise. Keep it for
    raylib/font and as a known-good test fixture; it must not stay the only way
    to get audio in.
-4. **Layers are still the mixer visualisation, not real layers.** Progression
-   and the sigil are in, but a track's "layer" is currently just its orbit and
-   node. The next real step is giving each track a distinct visual behaviour
-   derived from its rhythm — start with Starlight Echoes, whose dotted-eighth
-   delay (0.625 s) becomes solid after-images you can read off the screen.
+4. **Planets ignore their track's rhythm.** Every world is generated the same
+   way regardless of what its stem sounds like. The obvious next step is making
+   a planet move like its music — Starlight Echoes' dotted-eighth delay
+   (0.625 s) leaving after-images, Soft Kick pulsing its props on the beat —
+   which would finally tie the 3D scenes back to the audio clock.
+5. **One beacon per world, and it never changes.** Finding it is a single
+   puzzle; a world has nothing more to offer afterwards.
 5. **No puzzle sidecar.** `project.xml` cannot carry goal state, mix budget, or
    layer geometry. That needs a sidecar keyed by track id, beside the project,
    leaving the Bitwig file untouched and re-exportable.
@@ -203,8 +249,12 @@ revisit when arbitrary projects load.
 - C++20, raylib 5.5 static, built with `-Wall -Wextra -Wpedantic`. Keep it warning-clean.
 - Match the existing dense style in `src/`; don't reformat wholesale.
 - Cover mixer behaviour in `tests/mixer_test.cpp`, config parsing in
-  `tests/config_test.cpp`, and unlock rules in `tests/progress_test.cpp`; all
-  three run without an audio device or a display.
+  `tests/config_test.cpp`, unlock rules in `tests/progress_test.cpp`, and world
+  generation in `tests/planet_test.cpp`; all four run without an audio device
+  or a display.
+- The vendored raylib headers are included with `-isystem` so their warnings
+  stay out of our build. Keep our own code warning-clean under
+  `-Wall -Wextra -Wpedantic`.
 - Per the home guide: **Python** for one-off setup scripts, **Go** for anything
   long-lived. Game code is C++ because raylib is.
 - Generated output (`build/`, `artifacts/`, `assets/audio/`, `assets/font.ttf`)

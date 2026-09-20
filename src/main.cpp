@@ -1,7 +1,9 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
 #include "progress.hpp"
+#include "planet.hpp"
 #include "raylib.h"
+#include "raymath.h"   // must follow raylib.h: it uses raylib's vector types
 #include "rlgl.h"
 #include <GL/gl.h>
 #include <chrono>
@@ -25,6 +27,12 @@ static Progress progress;
 static bool sigilVisible=false;
 static float sigilX=0,sigilY=0,mouseX=0,mouseY=0;
 static bool sigilHot=false;
+enum class View { System, Planet };
+static View view=View::System;
+static int planetTrack=-1;
+static bool beaconOnScreen=false,beaconFound=false;
+static float beaconX=0,beaconY=0,camDistance=0;
+static constexpr float PlanetRadius=2.f;
 static void applyLayers() {
     for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
 }
@@ -50,6 +58,7 @@ struct Options {
     fs::path capture;
     fs::path progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"progress.json";
     bool windowed=false,check=false,resume=false;
+    double captureAfter=2;
     double seconds=0;
 };
 static std::string quote(const std::string& s) {
@@ -75,7 +84,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.4.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.5.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -89,7 +98,11 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
        <<",\"next_locked\":"<<(progress.nextLocked()>=0?quote(Names[progress.nextLocked()]):std::string("null"))
        <<",\"sigil_visible\":"<<(sigilVisible?"true":"false")
        <<",\"sigil_x\":"<<int(sigilX)<<",\"sigil_y\":"<<int(sigilY)
-       <<",\"sigil_hot\":"<<(sigilHot?"true":"false")<<",\"mouse_x\":"<<int(mouseX)<<",\"mouse_y\":"<<int(mouseY)<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
+       <<",\"sigil_hot\":"<<(sigilHot?"true":"false")<<",\"mouse_x\":"<<int(mouseX)<<",\"mouse_y\":"<<int(mouseY)
+       <<"},\"planet\":{\"view\":"<<quote(view==View::Planet?"planet":"system")
+       <<",\"track\":"<<(planetTrack>=0?quote(Names[planetTrack]):std::string("null"))
+       <<",\"beacon_on_screen\":"<<(beaconOnScreen?"true":"false")<<",\"beacon_found\":"<<(beaconFound?"true":"false")
+       <<",\"beacon_x\":"<<int(beaconX)<<",\"beacon_y\":"<<int(beaconY)<<",\"camera_distance\":"<<camDistance<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
        <<",\"tracks\":[";
     uint32_t mask=mixer.enabled;
     for(int i=0;i<TrackCount;++i) {
@@ -114,13 +127,14 @@ int main(int argc,char** argv) {
             if(arg=="--windowed")options.windowed=true;
             else if(arg=="--check-assets")options.check=true;
             else if(arg=="--resume")options.resume=true;
+            else if(arg=="--capture-after")options.captureAfter=std::stod(value());
             else if(arg=="--assets")options.assets=fs::absolute(value());
             else if(arg=="--state")options.state=fs::absolute(value());
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.4.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
-                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume\n";return 0;
+                std::cout<<"Orbital Drift 0.5.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
         mixer.load(options.assets/"audio");
@@ -141,7 +155,7 @@ int main(int argc,char** argv) {
         SetConfigFlags(FLAG_VSYNC_HINT|FLAG_MSAA_4X_HINT|FLAG_WINDOW_RESIZABLE);
         InitWindow(1440,900,"Orbital Drift");windowReady=true;
         SetWindowMinSize(1000,650);
-        SetExitKey(KEY_ESCAPE);
+        SetExitKey(KEY_NULL);   // Esc leaves the planet first; quitting is handled by hand
         if(!options.windowed) {
             int monitor=GetCurrentMonitor();
             SetWindowSize(GetMonitorWidth(monitor),GetMonitorHeight(monitor));ToggleFullscreen();
@@ -171,6 +185,29 @@ int main(int argc,char** argv) {
         Shader shader=LoadShader(nullptr,(options.assets/"space.fs").c_str());
         if(!IsShaderValid(shader)||shader.id==rlGetShaderIdDefault())throw std::runtime_error("Space shader failed to compile");
         int resLoc=GetShaderLocation(shader,"resolution"),timeLoc=GetShaderLocation(shader,"time"),energyLoc=GetShaderLocation(shader,"energy");
+        Shader lit=LoadShader((options.assets/"planet.vs").c_str(),(options.assets/"planet.fs").c_str());
+        if(!IsShaderValid(lit)||lit.id==rlGetShaderIdDefault())throw std::runtime_error("Planet shader failed to compile");
+        lit.locs[SHADER_LOC_MATRIX_MODEL]=GetShaderLocation(lit,"matModel");
+        lit.locs[SHADER_LOC_MATRIX_NORMAL]=GetShaderLocation(lit,"matNormal");
+        int lightLoc=GetShaderLocation(lit,"lightDir"),viewLoc=GetShaderLocation(lit,"viewPos"),ambientLoc=GetShaderLocation(lit,"ambient");
+        int terrainLoc=GetShaderLocation(lit,"terrain"),seaLoc=GetShaderLocation(lit,"seaColor"),landLoc=GetShaderLocation(lit,"landColor");
+        // Six clearly different silhouettes: the search has to be a conjunction
+        // of shape and colour, so the shapes must be unmistakable apart.
+        std::array<Mesh,PropKindCount> propMesh{};
+        propMesh[int(PropKind::Tower)]=GenMeshCylinder(.018f,.115f,9);
+        propMesh[int(PropKind::Dome)]=GenMeshHemiSphere(.040f,7,11);
+        propMesh[int(PropKind::Spire)]=GenMeshCone(.024f,.150f,8);
+        propMesh[int(PropKind::Grove)]=GenMeshSphere(.034f,6,8);
+        propMesh[int(PropKind::Arch)]=GenMeshTorus(.012f,.040f,6,10);
+        propMesh[int(PropKind::Crystal)]=GenMeshCube(.048f,.048f,.048f);
+        // Cylinders, cones and hemispheres are generated sitting on y=0; spheres,
+        // cubes and tori are centred, so they need lifting or they sink halfway in.
+        std::array<float,PropKindCount> propLift{0.f,0.f,0.f,.034f,.012f,.024f};
+        Mesh globeMesh=GenMeshSphere(PlanetRadius,40,56);
+        Material propMat=LoadMaterialDefault();propMat.shader=lit;
+        std::array<Planet,TrackCount> planets{};
+        for(int i=0;i<TrackCount;++i)planets[i]=generatePlanet(i,layers.colors[i],2400);
+        Watched planetShaderWatch{options.assets/"planet.fs"};planetShaderWatch.prime();
         Watched shaderWatch{options.assets/"space.fs"},configWatch{options.assets/"layers.conf"};
         shaderWatch.prime();configWatch.prime();
         std::cout<<"[reload] watching space.fs and layers.conf; saves apply live"<<std::endl;
@@ -198,6 +235,9 @@ int main(int argc,char** argv) {
         makeStars();
         std::array<float,TrackCount> visibility{},meter{};
         double unlockedAt=-9;std::string unlockedName;
+        Camera3D camera{};camera.up={0,1,0};camera.fovy=46;camera.projection=CAMERA_PERSPECTIVE;camera.target={0,0,0};
+        float camYaw=.6f,camPitch=.35f,camDist=PlanetRadius*5.4f,camDistWant=PlanetRadius*2.6f;
+        double enteredAt=-9;
         float sigilPulse=0;
         double started=GetTime(),lastState=-1,toastAt=-9;
         bool captured=false;
@@ -216,16 +256,153 @@ int main(int argc,char** argv) {
                     } else {toast=note;reloadError=note;}
                     toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
                 }
+                if(planetShaderWatch.changed()) {
+                    Shader next=LoadShader((options.assets/"planet.vs").c_str(),(options.assets/"planet.fs").c_str());
+                    if(IsShaderValid(next)&&next.id!=rlGetShaderIdDefault()) {
+                        UnloadShader(lit);lit=next;
+                        lit.locs[SHADER_LOC_MATRIX_MODEL]=GetShaderLocation(lit,"matModel");
+                        lit.locs[SHADER_LOC_MATRIX_NORMAL]=GetShaderLocation(lit,"matNormal");
+                        lightLoc=GetShaderLocation(lit,"lightDir");viewLoc=GetShaderLocation(lit,"viewPos");
+                        ambientLoc=GetShaderLocation(lit,"ambient");terrainLoc=GetShaderLocation(lit,"terrain");
+                        seaLoc=GetShaderLocation(lit,"seaColor");landLoc=GetShaderLocation(lit,"landColor");propMat.shader=lit;
+                        ++shaderReloads;toast="planet.fs reloaded";reloadError.clear();
+                    } else {UnloadShader(next);toast="planet.fs did not compile - keeping the previous shader";reloadError=toast;}
+                    toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
+                }
                 if(configWatch.changed()) {
                     int previousStars=layers.starCount;
                     layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
                     if(layers.starCount!=previousStars)makeStars();
+                    for(int i=0;i<TrackCount;++i)planets[i]=generatePlanet(i,layers.colors[i],2400);
                     ++configReloads;reloadError=layers.note;
                     toast=layers.note.empty()?"layers.conf reloaded":"layers.conf: "+layers.note;
                     toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
                 }
             }
             float w=float(GetScreenWidth()),h=float(GetScreenHeight()),u=std::min(w/1600.f,h/900.f);
+            // ---------- planet view: a globe you orbit, with one thing hidden on it ----------
+            if(view==View::Planet) {
+                Planet& planet=planets[size_t(planetTrack)];
+                float step=std::min(GetFrameTime(),.1f),now=float(elapsed);
+                if(IsKeyPressed(KEY_ESCAPE)||IsKeyPressed(KEY_BACKSPACE)) {
+                    view=View::System;planetTrack=-1;beaconOnScreen=false;
+                    std::cout<<"[planet] left"<<std::endl;continue;
+                }
+                if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                    Vector2 drag=GetMouseDelta();
+                    camYaw-=drag.x*.0062f;camPitch=std::clamp(camPitch+drag.y*.0062f,-1.45f,1.45f);
+                }
+                if(IsKeyDown(KEY_LEFT))camYaw+=step*1.1f;
+                if(IsKeyDown(KEY_RIGHT))camYaw-=step*1.1f;
+                if(IsKeyDown(KEY_UP))camPitch=std::clamp(camPitch+step*.9f,-1.45f,1.45f);
+                if(IsKeyDown(KEY_DOWN))camPitch=std::clamp(camPitch-step*.9f,-1.45f,1.45f);
+                auto zoom=[&](float factor){camDistWant=std::clamp(camDistWant*factor,PlanetRadius*1.2f,PlanetRadius*4.4f);};
+                if(float wheel=GetMouseWheelMove();wheel!=0)zoom(1-wheel*.12f);
+                if(IsKeyDown(KEY_W))zoom(1-step*.85f);
+                if(IsKeyDown(KEY_S))zoom(1+step*.85f);
+                camDist+=(camDistWant-camDist)*(1-std::exp(-step*4.2f));
+                camDistance=camDist;
+                camera.position={std::cos(camPitch)*std::cos(camYaw)*camDist,std::sin(camPitch)*camDist,
+                                 std::cos(camPitch)*std::sin(camYaw)*camDist};
+                Vector3 camUnit=Vector3Normalize(camera.position);
+
+                const Prop& target=planet.props[size_t(planet.beacon)];
+                Vector3 beaconDir=Vector3Normalize({target.normal.x,target.normal.y,target.normal.z});
+                Vector2 beaconScreen=GetWorldToScreen(Vector3Scale(beaconDir,PlanetRadius+.16f*target.scale),camera);
+                beaconOnScreen=Vector3DotProduct(beaconDir,camUnit)>.12f
+                    &&beaconScreen.x>0&&beaconScreen.y>0&&beaconScreen.x<w&&beaconScreen.y<h;
+                beaconX=beaconScreen.x;beaconY=beaconScreen.y;beaconFound=planet.found;
+                Vector2 pointer=GetMousePosition();
+                bool overBeacon=beaconOnScreen&&Vector2Distance(pointer,beaconScreen)<24*u;
+                if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)&&!planet.found) {
+                    if(overBeacon) {
+                        planet.found=beaconFound=true;
+                        toast="Found it";toastAt=elapsed;reloadError.clear();
+                        if(!progress.complete()&&planetTrack==progress.frontier()) {
+                            unlockedName=Names[progress.nextLocked()];
+                            progress.advance();saveProgress(options.progressFile,progress);
+                            mixer.enabled|=1u<<progress.frontier();unlockedAt=elapsed;
+                            std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<TrackCount<<')'<<std::endl;
+                        }
+                    } else {toast="Not that one";toastAt=elapsed;reloadError.clear();}
+                }
+                SetMouseCursor(overBeacon?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
+
+                float lightDir[3]={-.42f,-.58f,-.70f},ambient[3]={.21f,.24f,.31f};
+                float eye[3]={camera.position.x,camera.position.y,camera.position.z};
+                SetShaderValue(lit,lightLoc,lightDir,SHADER_UNIFORM_VEC3);
+                SetShaderValue(lit,viewLoc,eye,SHADER_UNIFORM_VEC3);
+                SetShaderValue(lit,ambientLoc,ambient,SHADER_UNIFORM_VEC3);
+
+                BeginDrawing();ClearBackground({3,6,13,255});
+                for(auto star:stars)
+                    DrawCircleV({star.x*w,star.y*h},star.r*u*.75f,
+                                Fade({178,204,226,255},.13f+.15f*std::sin(now*.3f+star.phase)));
+                auto rgb3=[](Rgb c){return std::array<float,3>{c.r/255.f,c.g/255.f,c.b/255.f};};
+                auto sea=rgb3(planet.sea),land=rgb3(planet.land);
+                float on=1.f,off=0.f;
+                SetShaderValue(lit,seaLoc,sea.data(),SHADER_UNIFORM_VEC3);
+                SetShaderValue(lit,landLoc,land.data(),SHADER_UNIFORM_VEC3);
+                BeginMode3D(camera);
+                SetShaderValue(lit,terrainLoc,&on,SHADER_UNIFORM_FLOAT);
+                propMat.maps[MATERIAL_MAP_DIFFUSE].color=WHITE;
+                DrawMesh(globeMesh,propMat,MatrixIdentity());
+                SetShaderValue(lit,terrainLoc,&off,SHADER_UNIFORM_FLOAT);
+                for(const Prop& prop:planet.props) {
+                    Vector3 up{prop.normal.x,prop.normal.y,prop.normal.z};
+                    if(Vector3DotProduct(up,camUnit)<.035f)continue;   // the far side is never drawn
+                    Rgb tint=planet.palette[prop.palette];
+                    propMat.maps[MATERIAL_MAP_DIFFUSE].color=Color{tint.r,tint.g,tint.b,255};
+                    float size=prop.scale,stand=PlanetRadius+propLift[int(prop.kind)]*prop.scale;
+                    DrawMesh(propMesh[int(prop.kind)],propMat,
+                        MatrixMultiply(MatrixMultiply(MatrixMultiply(
+                            MatrixScale(size,size,size),MatrixRotateY(prop.spin)),
+                            QuaternionToMatrix(QuaternionFromVector3ToVector3({0,1,0},up))),
+                            MatrixTranslate(up.x*stand,up.y*stand,up.z*stand)));
+                }
+                EndMode3D();
+
+                float pad=38*u;
+                Rgb wanted=planet.palette[BeaconPalette];
+                Color want{wanted.r,wanted.g,wanted.b,255};
+                text(font,"PLANET",pad,pad-10*u,12*u,{118,150,172,255});
+                text(font,Names[planetTrack],pad,pad+8*u,34*u,{231,238,244,255});
+                text(font,planet.found?"This world has given up its secret":"Somewhere down there, one spire wears this colour",
+                     pad,pad+50*u,13*u,{136,162,182,255});
+                // The target card: a conjunction search is only fair if you can
+                // see both halves of what you are hunting for.
+                float cardW=196*u,cardH=112*u,cardX=w-pad-cardW,cardY2=pad-14*u;
+                DrawRectangleRounded({cardX,cardY2,cardW,cardH},.1f,8,{10,17,27,232});
+                DrawRectangleRoundedLinesEx({cardX,cardY2,cardW,cardH},.1f,8,u,Fade(want,.45f));
+                text(font,"FIND",cardX+14*u,cardY2+11*u,11*u,{132,160,180,255});
+                DrawPoly({cardX+cardW*.5f,cardY2+62*u},3,25*u,-90,want);
+                DrawPolyLinesEx({cardX+cardW*.5f,cardY2+62*u},3,25*u,-90,u*1.4f,Fade({255,255,255,255},.35f));
+                centered(font,"A SPIRE, THIS COLOUR",cardX+cardW*.5f,cardY2+88*u,10*u,Fade(want,.85f));
+                if(planet.found) {
+                    float ring=(26+5*std::sin(now*3))*u;
+                    DrawCircleLinesV(beaconScreen,ring,Fade({208,244,228,255},.9f));
+                    DrawCircleLinesV(beaconScreen,ring*1.35f,Fade({208,244,228,255},.35f));
+                    centered(font,"FOUND",beaconScreen.x,beaconScreen.y+ring+7*u,11*u,{208,244,228,255});
+                } else if(overBeacon) {
+                    DrawCircleLinesV(beaconScreen,24*u,Fade(want,.55f));
+                }
+                if(elapsed-toastAt<2.6) {
+                    float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);
+                    centered(font,toast,w*.5f,pad-8*u,13*u,
+                             Fade(reloadError.empty()?Color{124,235,210,255}:Color{240,172,138,255},alpha));
+                }
+                DrawRectangle(0,int(h-46*u),int(w),int(46*u),Fade({3,6,13,255},.82f));
+                centered(font,"DRAG  ORBIT     WHEEL / W S  ZOOM     RIGHT-CLICK  MARK IT     ESC  BACK",
+                         w*.5f,h-30*u,10*u,{128,158,176,255});
+                EndDrawing();
+                if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
+                if(!options.capture.empty()&&!captured&&elapsed>options.captureAfter) {
+                    fs::create_directories(options.capture.parent_path());
+                    Image shot=LoadImageFromScreen();
+                    captured=ExportImage(shot,options.capture.c_str());UnloadImage(shot);
+                }
+                continue;
+            }
             float margin=52*u, gap=12*u,cardWidth=(w-margin*2-gap*6)/7,cardY=h-169*u,cardH=112*u;
             Vector2 center{w*.5f,h*.435f};float radius=std::min(w*.31f,h*.34f);
             Vector2 mouse=GetMousePosition();
@@ -235,13 +412,14 @@ int main(int argc,char** argv) {
             float beat=loopPos*64;
             std::array<Vector2,TrackCount> nodes{};
             std::array<Rectangle,TrackCount> cards{};
-            int hovered=-1;
+            int hovered=-1,hoveredNode=-1;
             for(int i=0;i<TrackCount;++i) {
                 float orbit=radius*(layers.orbitBase+i*layers.orbitStep);
                 float angle=motion*(.055f+i*.009f)+float(i)*2.39996f;
                 nodes[i]={center.x+std::cos(angle)*orbit,center.y+std::sin(angle)*orbit*.56f};
                 cards[i]={margin+i*(cardWidth+gap),cardY,cardWidth,cardH};
-                if(CheckCollisionPointRec(mouse,cards[i])||CheckCollisionPointCircle(mouse,nodes[i],22*u))hovered=i;
+                if(CheckCollisionPointRec(mouse,cards[i]))hovered=i;              // the card is the switch
+                if(CheckCollisionPointCircle(mouse,nodes[i],22*u))hoveredNode=i;   // the node is the world
                 if(IsKeyPressed(KEY_ONE+i)||(hovered==i&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
                     if(!progress.isUnlocked(i)) {
                         toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();
@@ -250,6 +428,21 @@ int main(int argc,char** argv) {
                     }
                 }
             }
+            auto enterPlanet=[&](int track){
+                view=View::Planet;planetTrack=track;
+                camYaw=.6f;camPitch=.35f;camDist=PlanetRadius*5.6f;camDistWant=PlanetRadius*2.6f;
+                enteredAt=elapsed;(void)enteredAt;
+                std::cout<<"[planet] entered "<<Names[track]<<std::endl;
+            };
+            if(hoveredNode>=0&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if(!progress.isUnlocked(hoveredNode))     {toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();}
+                else if(!(mask&(1u<<hoveredNode)))        {toast="Wake the signal to reach its world";toastAt=elapsed;reloadError.clear();}
+                else enterPlanet(hoveredNode);
+            }
+            // Z drops into the frontier world without hunting a moving node.
+            if(IsKeyPressed(KEY_Z)&&progress.isUnlocked(progress.frontier())&&(mask&(1u<<progress.frontier())))
+                enterPlanet(progress.frontier());
+            if(IsKeyPressed(KEY_ESCAPE))break;
             Rectangle pauseButton{margin, h-39*u,82*u,26*u};
             Rectangle allButton{margin+97*u,h-39*u,82*u,26*u};
             Rectangle silenceButton{margin+194*u,h-39*u,82*u,26*u};
@@ -267,8 +460,8 @@ int main(int argc,char** argv) {
                 else{int mon=GetCurrentMonitor();SetWindowSize(GetMonitorWidth(mon),GetMonitorHeight(mon));ToggleFullscreen();}
             }
             mask=mixer.enabled;
-            // The clue lives on the frontier track's orbit, exposed with the
-            // rest of that track's layer whenever the track is switched on.
+            // The sigil marks which world still holds a key. It is a doorway:
+            // the unseal itself is earned down there, by finding the beacon.
             int frontier=progress.frontier();
             float sigilOrbit=radius*(layers.orbitBase+frontier*layers.orbitStep);
             Vector2 sigil{center.x-sigilOrbit,center.y};
@@ -281,15 +474,9 @@ int main(int argc,char** argv) {
             sigilPulse+=((sigilVisible?1.f:0.f)-sigilPulse)*(1-std::exp(-dt*9));
             bool onSigil=sigilVisible&&CheckCollisionPointCircle(mouse,sigil,26*u);
             sigilHot=onSigil;
-            if(onSigil&&IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
-                unlockedName=Names[progress.nextLocked()];
-                progress.advance();
-                saveProgress(options.progressFile,progress);
-                mixer.enabled|=1u<<progress.frontier();
-                mask=mixer.enabled;unlockedAt=elapsed;
-                std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<TrackCount<<')'<<std::endl;
-            }
-            bool hot=onSigil||hovered>=0||CheckCollisionPointRec(mouse,pauseButton)||CheckCollisionPointRec(mouse,allButton)||CheckCollisionPointRec(mouse,silenceButton)||CheckCollisionPointRec(mouse,volumeHit);
+            if(onSigil&&(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)||IsMouseButtonPressed(MOUSE_BUTTON_LEFT)))
+                enterPlanet(frontier);
+            bool hot=onSigil||hoveredNode>=0||hovered>=0||CheckCollisionPointRec(mouse,pauseButton)||CheckCollisionPointRec(mouse,allButton)||CheckCollisionPointRec(mouse,silenceButton)||CheckCollisionPointRec(mouse,volumeHit);
             SetMouseCursor(hot?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
             for(int i=0;i<TrackCount;++i) {
                 visibility[i]+=(float(bool(mask&(1u<<i)))-visibility[i])*(1-std::exp(-dt*7));
@@ -338,9 +525,13 @@ int main(int argc,char** argv) {
                 float strength=.2f+visibility[i]*.8f;
                 DrawLineEx(center,nodes[i],u,Fade(c,(.015f+meter[i]*.045f)*visibility[i]));
                 glow(nodes[i],(6+meter[i]*13)*u*layers.glowScale,c,strength*.8f);
-                DrawCircleLinesV(nodes[i],(15+(hovered==i?4:0))*u,Fade(c,.2f+visibility[i]*.5f));
+                DrawCircleLinesV(nodes[i],(15+(hoveredNode==i?4:0))*u,Fade(c,.2f+visibility[i]*.5f));
                 centered(font,std::to_string(i+1),nodes[i].x,nodes[i].y-5*u,10*u,{235,245,255,255});
-                if(hovered==i)centered(font,Names[i],nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
+                if(hoveredNode==i) {
+                    centered(font,Names[i],nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
+                    centered(font,(mask&(1u<<i))?"CLICK TO DESCEND":"WAKE IT FIRST",nodes[i].x,nodes[i].y+44*u,10*u,
+                             Fade(c,(mask&(1u<<i))?.9f:.45f));
+                }
             }
             if(sigilPulse>.012f) {
                 Color sc=Colors[frontier];float a=sigilPulse,rr=(13+2.5f*std::sin(motion*4))*u;
@@ -349,7 +540,7 @@ int main(int argc,char** argv) {
                 DrawCircleLinesV(sigil,rr*(1.5f+.25f*std::sin(motion*2.2f)),Fade(sc,a*.28f));
                 DrawLineEx({sigil.x+6*u,sigil.y-7*u},{sigil.x-3*u,sigil.y},2*u,Fade(sc,a));
                 DrawLineEx({sigil.x-3*u,sigil.y},{sigil.x+6*u,sigil.y+7*u},2*u,Fade(sc,a));
-                centered(font,onSigil?"RIGHT-CLICK TO UNSEAL":"SIGIL",sigil.x,sigil.y+rr+7*u,9*u,Fade(sc,a*.85f));
+                centered(font,onSigil?"CLICK TO DESCEND":"A KEY LIES BELOW",sigil.x,sigil.y+rr+7*u,9*u,Fade(sc,a*.85f));
             }
             float pulse=std::exp(-(beat-std::floor(beat))*5)*energy;
             glow(center,(30+energy*7+pulse*3)*u,{100,222,226,255},.22f+energy*.25f);
@@ -362,7 +553,7 @@ int main(int argc,char** argv) {
                 centered(font,"a new signal joins the drift",center.x,center.y+radius*.69f+24*u,13*u,Fade({134,180,178,255},a*.8f));
             } else {
                 centered(font,active?"THE SIGNAL IS YOURS":"SPACE TO BREATHE",center.x,center.y+radius*.69f,12*u,{143,173,185,255});
-                centered(font,progress.complete()?"Every signal is yours":(active?"A sigil waits on the lit orbit":"Wake a signal to see its layer"),
+                centered(font,progress.complete()?"Every signal is yours":(active?"A sigil marks the world that holds the next key":"Wake a signal to see its layer"),
                          center.x,center.y+radius*.69f+24*u,14*u,{102,129,149,255});
             }
             float rulerY=cardY-39*u;
@@ -411,14 +602,14 @@ int main(int argc,char** argv) {
                 float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);
                 centered(font,toast,w*.5f,30*u,12*u,Fade(reloadError.empty()?Color{124,235,210,255}:Color{240,172,138,255},alpha));
             }
-            centered(font,"1-7  TRACKS    SPACE  PAUSE    F11  FULLSCREEN    ESC  EXIT",w*.5f,h-32*u,10*u,{106,137,155,255});
+            centered(font,"1-7  TRACKS    CLICK AN ORBIT  DESCEND    Z  FRONTIER WORLD    SPACE  PAUSE    ESC  EXIT",w*.5f,h-32*u,10*u,{106,137,155,255});
             text(font,"VOLUME",volumeBar.x-66*u,h-32*u,10*u,{143,168,183,255});
             DrawRectangleRec(volumeBar,{46,67,80,255});
             DrawRectangleRec({volumeBar.x,volumeBar.y,volumeBar.width*mixer.volume,volumeBar.height},{126,195,191,255});
             DrawCircleV({volumeBar.x+volumeBar.width*mixer.volume,volumeBar.y+2*u},4*u,{196,235,225,255});
             EndDrawing();
             if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
-            if(!options.capture.empty()&&!captured&&elapsed>2) {
+            if(!options.capture.empty()&&!captured&&elapsed>options.captureAfter) {
                 fs::create_directories(options.capture.parent_path());
                 Image screenshot=LoadImageFromScreen();
                 bool saved=ExportImage(screenshot,options.capture.c_str());UnloadImage(screenshot);
@@ -429,6 +620,8 @@ int main(int argc,char** argv) {
         writeState(options,mixer,gpu,vendor,false);
         StopAudioStream(stream);UnloadAudioStream(stream);streamReady=false;
         CloseAudioDevice();audioReady=false;audioMixer=nullptr;
+        for(Mesh& mesh:propMesh)UnloadMesh(mesh);
+        UnloadMesh(globeMesh);UnloadShader(lit);
         UnloadRenderTexture(background);UnloadShader(shader);UnloadFont(font);CloseWindow();windowReady=false;
         return 0;
     } catch(const std::exception& error) {
