@@ -25,6 +25,7 @@ make run      # fullscreen
 
 python3 scripts/check_controls.py     # drives real input against a live window
 python3 scripts/check_hot_reload.py   # edits assets under a live session
+python3 scripts/check_progression.py  # clicks the sigil and checks the unlock persists
 ```
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
@@ -55,6 +56,45 @@ broken, so treat the following as load-bearing:
 **The playhead is the game clock.** Drive animation from `Mixer::position`, not
 frame time, so a pulsing platform and a kick drum are the same number. At 72 BPM:
 beat 0.8333 s, bar 3.3333 s, loop 53.3333 s / 2,560,000 frames.
+
+## Progression
+
+Tracks unlock **right to left**. A fresh run opens only track 7 (Orbit Hats);
+every other track is sealed — silent, un-toggleable, its name hidden. The
+leftmost unlocked track is the *frontier*, and its layer carries the clue that
+opens the track to its left.
+
+The clue is a **sigil** on the frontier track's orbit, at the leftmost point of
+the ellipse, pointing toward the sealed tracks. It appears only while that
+track is both switched on and **audibly sounding**, so the puzzle is solved by
+listening rather than hunting pixels. Clicking it unseals the next track, which
+starts sounding immediately.
+
+Rules:
+
+- **Unlock order is fixed and derived, never stored per track.** `Progress`
+  holds one integer; `isUnlocked(i)` is `i >= TrackCount - unlocked`. Do not
+  add a per-track unlocked flag — one integer is the whole save file.
+- **A sealed track must never sound.** It cannot be toggled, and `ALL ON` /
+  `M` use `progress.mask()`, not `AllTracks`. A sealed track appearing in the
+  mix is the bug this design most needs protecting from.
+- **Audibility is self-calibrating.** `Audibility::sounding` compares a track
+  to a decaying record of *its own* recent peak. Never hardcode a level
+  threshold: the stems span roughly 19 dB (Soft Kick −10.5, Cosmic Dust −29.1),
+  so any fixed value makes quiet tracks unsolvable and loud ones trivial.
+- **Difficulty is data.** `sigil.level` in `layers.conf` sets what fraction of
+  its own peak counts as sounding, and hot-reloads, so it can be tuned against
+  live audio without a rebuild.
+- **Losing progress must never block launching.** A missing or corrupt
+  `artifacts/progress.json` silently starts a fresh run; out-of-range values
+  are clamped. `--reset-progress` starts over deliberately.
+
+The musical consequence is worth knowing: right-to-left means the run *starts*
+with Orbit Hats (swung eighths) and *ends* with Nebula Pad (the harmonic bed),
+so the world gains atmosphere as it fills in, inverting the usual build. That
+was a deliberate reading of "first track from right to left" — if the intent
+was to begin with the pad, the order reverses and the sigil moves to the
+rightmost orbit.
 
 ## Hot reload
 
@@ -111,7 +151,7 @@ layers, puzzles, or player state, extend that JSON in the same pass — an agent
 that cannot read the result cannot verify its own work. Keep `--check-assets`
 honest about anything newly required at load.
 
-## Current state (v0.2.0)
+## Current state (v0.3.0)
 
 First pass is working: fullscreen, hardware accelerated (verified on the
 RTX 3090 Ti), seven stems in sync, per-track toggles with metering.
@@ -132,10 +172,11 @@ Known gaps, roughly in order:
    stems from `~/Music/Orbital Drift` and hard-fails otherwise. Keep it for
    raylib/font and as a known-good test fixture; it must not stay the only way
    to get audio in.
-4. **No visual layers bound to tracks yet.** The current display visualises the
-   mixer; it does not implement the mechanic. Start with Starlight Echoes —
-   solid after-images at its dotted-eighth delay (0.625 s) — which demonstrates
-   the whole thesis on one screen.
+4. **Layers are still the mixer visualisation, not real layers.** Progression
+   and the sigil are in, but a track's "layer" is currently just its orbit and
+   node. The next real step is giving each track a distinct visual behaviour
+   derived from its rhythm — start with Starlight Echoes, whose dotted-eighth
+   delay (0.625 s) becomes solid after-images you can read off the screen.
 5. **No puzzle sidecar.** `project.xml` cannot carry goal state, mix budget, or
    layer geometry. That needs a sidecar keyed by track id, beside the project,
    leaving the Bitwig file untouched and re-exportable.
@@ -147,8 +188,9 @@ revisit when arbitrary projects load.
 
 - C++20, raylib 5.5 static, built with `-Wall -Wextra -Wpedantic`. Keep it warning-clean.
 - Match the existing dense style in `src/`; don't reformat wholesale.
-- Cover mixer behaviour in `tests/mixer_test.cpp` and config parsing in
-  `tests/config_test.cpp`; both run without an audio device or a display.
+- Cover mixer behaviour in `tests/mixer_test.cpp`, config parsing in
+  `tests/config_test.cpp`, and unlock rules in `tests/progress_test.cpp`; all
+  three run without an audio device or a display.
 - Per the home guide: **Python** for one-off setup scripts, **Go** for anything
   long-lived. Game code is C++ because raylib is.
 - Generated output (`build/`, `artifacts/`, `assets/audio/`, `assets/font.ttf`)

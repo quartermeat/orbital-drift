@@ -1,5 +1,6 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
+#include "progress.hpp"
 #include "raylib.h"
 #include "rlgl.h"
 #include <GL/gl.h>
@@ -20,6 +21,8 @@ static LayerConfig layers;
 static std::array<Color,TrackCount> Colors{};
 static int configReloads=0,shaderReloads=0;
 static std::string reloadError;
+static Progress progress;
+static bool sigilVisible=false;
 static void applyLayers() {
     for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
 }
@@ -43,7 +46,8 @@ struct Options {
     fs::path assets=fs::canonical("/proc/self/exe").parent_path().parent_path()/"assets";
     fs::path state=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"state.json";
     fs::path capture;
-    bool windowed=false,check=false;
+    fs::path progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"progress.json";
+    bool windowed=false,check=false,reset=false;
     double seconds=0;
 };
 static std::string quote(const std::string& s) {
@@ -69,7 +73,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.2.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.3.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -79,11 +83,15 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
        <<",\"volume\":"<<mixer.volume.load()
        <<",\"hot_reload\":{\"config_reloads\":"<<configReloads<<",\"shader_reloads\":"<<shaderReloads
        <<",\"last_error\":"<<quote(reloadError)<<"}"
+       <<",\"progress\":{\"unlocked\":"<<progress.unlocked<<",\"frontier\":"<<quote(Names[progress.frontier()])
+       <<",\"next_locked\":"<<(progress.nextLocked()>=0?quote(Names[progress.nextLocked()]):std::string("null"))
+       <<",\"sigil_visible\":"<<(sigilVisible?"true":"false")<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
        <<",\"tracks\":[";
     uint32_t mask=mixer.enabled;
     for(int i=0;i<TrackCount;++i) {
         if(i)out<<',';
-        out<<"{\"name\":"<<quote(Names[i])<<",\"enabled\":"<<((mask&(1u<<i))?"true":"false")<<",\"level\":"<<mixer.levels[i].load()<<'}';
+        out<<"{\"name\":"<<quote(Names[i])<<",\"enabled\":"<<((mask&(1u<<i))?"true":"false")
+           <<",\"unlocked\":"<<(progress.isUnlocked(i)?"true":"false")<<",\"level\":"<<mixer.levels[i].load()<<'}';
     }
     out<<"]\n}\n";out.close();
     if(!out) throw std::runtime_error("Cannot write status: "+options.state.string());
@@ -101,13 +109,14 @@ int main(int argc,char** argv) {
             auto value=[&](){if(i+1>=argc)throw std::runtime_error("Missing value for "+arg);return std::string(argv[++i]);};
             if(arg=="--windowed")options.windowed=true;
             else if(arg=="--check-assets")options.check=true;
+            else if(arg=="--reset-progress")options.reset=true;
             else if(arg=="--assets")options.assets=fs::absolute(value());
             else if(arg=="--state")options.state=fs::absolute(value());
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.2.0\nDefault: fullscreen. Click cards/orbs or 1-7 toggle tracks.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
-                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets\n";return 0;
+                std::cout<<"Orbital Drift 0.3.0\nDefault: fullscreen. Click cards/orbs or 1-7 toggle tracks.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --reset-progress\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
         mixer.load(options.assets/"audio");
@@ -142,6 +151,10 @@ int main(int argc,char** argv) {
         std::cout<<"[graphics] "<<gpu<<" / "<<glString(GL_VERSION)<<std::endl;
         if(!fs::exists(options.assets/"font.ttf")||!fs::exists(options.assets/"space.fs"))
             throw std::runtime_error("Missing graphics assets; run python3 scripts/setup.py");
+        if(options.reset){std::error_code code;fs::remove(options.progressFile,code);}
+        progress=loadProgress(options.progressFile);
+        mixer.enabled=progress.mask();
+        std::cout<<"[progress] "<<progress.unlocked<<" of "<<TrackCount<<" signals unlocked; frontier "<<Names[progress.frontier()]<<std::endl;
         layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
         if(!layers.note.empty())std::cout<<"[config] "<<layers.note<<std::endl;
         Font font=LoadFontEx((options.assets/"font.ttf").c_str(),72,nullptr,0);
@@ -176,7 +189,11 @@ int main(int argc,char** argv) {
                 GetRandomValue(3,14)/10.f,GetRandomValue(0,100)/10.f});
         };
         makeStars();
-        std::array<float,TrackCount> visibility{},meter{};visibility.fill(1);
+        std::array<float,TrackCount> visibility{},meter{};
+        for(int i=0;i<TrackCount;++i)visibility[i]=progress.isUnlocked(i)?1.f:0.f;
+        Audibility audible;
+        double unlockedAt=-9;std::string unlockedName;
+        float sigilPulse=0;
         double started=GetTime(),lastState=-1,toastAt=-9;
         bool captured=false;
         long frame=0;
@@ -209,8 +226,8 @@ int main(int argc,char** argv) {
             Vector2 mouse=GetMousePosition();
             uint32_t mask=mixer.enabled;
             float dt=std::min(GetFrameTime(),.1f),motion=float(elapsed);
-            float progress=float(mixer.position.load())/float(mixer.frames);
-            float beat=progress*64;
+            float loopPos=float(mixer.position.load())/float(mixer.frames);
+            float beat=loopPos*64;
             std::array<Vector2,TrackCount> nodes{};
             std::array<Rectangle,TrackCount> cards{};
             int hovered=-1;
@@ -221,7 +238,11 @@ int main(int argc,char** argv) {
                 cards[i]={margin+i*(cardWidth+gap),cardY,cardWidth,cardH};
                 if(CheckCollisionPointRec(mouse,cards[i])||CheckCollisionPointCircle(mouse,nodes[i],22*u))hovered=i;
                 if(IsKeyPressed(KEY_ONE+i)||(hovered==i&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
-                    mixer.toggle(i);std::cout<<"[track] "<<(i+1)<<' '<<Names[i]<<' '<<((mixer.enabled&(1u<<i))?"on":"off")<<std::endl;
+                    if(!progress.isUnlocked(i)) {
+                        toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();
+                    } else {
+                        mixer.toggle(i);std::cout<<"[track] "<<(i+1)<<' '<<Names[i]<<' '<<((mixer.enabled&(1u<<i))?"on":"off")<<std::endl;
+                    }
                 }
             }
             Rectangle pauseButton{margin, h-39*u,82*u,26*u};
@@ -230,8 +251,8 @@ int main(int argc,char** argv) {
             Rectangle volumeBar{w-margin-130*u,h-28*u,130*u,4*u};
             Rectangle volumeHit{volumeBar.x,volumeBar.y-12*u,volumeBar.width,28*u};
             if(IsKeyPressed(KEY_SPACE)||(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)&&CheckCollisionPointRec(mouse,pauseButton)))mixer.playing=!mixer.playing;
-            if(IsKeyPressed(KEY_A)||(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)&&CheckCollisionPointRec(mouse,allButton)))mixer.enabled=AllTracks;
-            if(IsKeyPressed(KEY_M))mixer.enabled=mixer.enabled?0:AllTracks;
+            if(IsKeyPressed(KEY_A)||(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)&&CheckCollisionPointRec(mouse,allButton)))mixer.enabled=progress.mask();
+            if(IsKeyPressed(KEY_M))mixer.enabled=mixer.enabled?0:progress.mask();
             if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)&&CheckCollisionPointRec(mouse,silenceButton))mixer.enabled=0;
             if(IsKeyPressed(KEY_EQUAL)||IsKeyPressed(KEY_KP_ADD))mixer.volume=std::min(1.f,mixer.volume+.05f);
             if(IsKeyPressed(KEY_MINUS)||IsKeyPressed(KEY_KP_SUBTRACT))mixer.volume=std::max(0.f,mixer.volume-.05f);
@@ -241,7 +262,25 @@ int main(int argc,char** argv) {
                 else{int mon=GetCurrentMonitor();SetWindowSize(GetMonitorWidth(mon),GetMonitorHeight(mon));ToggleFullscreen();}
             }
             mask=mixer.enabled;
-            bool hot=hovered>=0||CheckCollisionPointRec(mouse,pauseButton)||CheckCollisionPointRec(mouse,allButton)||CheckCollisionPointRec(mouse,silenceButton)||CheckCollisionPointRec(mouse,volumeHit);
+            // The clue lives on the frontier track's orbit and only answers
+            // while that track is actually sounding, so finding it is listening.
+            int frontier=progress.frontier();
+            float sigilOrbit=radius*(layers.orbitBase+frontier*layers.orbitStep);
+            Vector2 sigil{center.x-sigilOrbit,center.y};
+            bool frontierOn=(mask>>frontier)&1u;
+            sigilVisible=!progress.complete()&&frontierOn
+                &&audible.sounding(frontier,mixer.levels[frontier].load(),dt,layers.sigilLevel);
+            sigilPulse+=((sigilVisible?1.f:0.f)-sigilPulse)*(1-std::exp(-dt*9));
+            bool onSigil=sigilVisible&&hovered<0&&CheckCollisionPointCircle(mouse,sigil,26*u);
+            if(onSigil&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                unlockedName=Names[progress.nextLocked()];
+                progress.advance();
+                saveProgress(options.progressFile,progress);
+                mixer.enabled|=1u<<progress.frontier();
+                mask=mixer.enabled;unlockedAt=elapsed;
+                std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<TrackCount<<')'<<std::endl;
+            }
+            bool hot=onSigil||hovered>=0||CheckCollisionPointRec(mouse,pauseButton)||CheckCollisionPointRec(mouse,allButton)||CheckCollisionPointRec(mouse,silenceButton)||CheckCollisionPointRec(mouse,volumeHit);
             SetMouseCursor(hot?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
             for(int i=0;i<TrackCount;++i) {
                 visibility[i]+=(float(bool(mask&(1u<<i)))-visibility[i])*(1-std::exp(-dt*7));
@@ -266,12 +305,22 @@ int main(int argc,char** argv) {
             text(font,"Build a world out of sound.",margin,109*u,16*u,{144,161,183,255});
             int active=0;for(int i=0;i<7;++i)if(mask&(1u<<i))++active;
             text(font,"72 BPM   /   A MINOR",w-margin-208*u,40*u,16*u,{188,207,218,255});
-            text(font,std::to_string(active)+" OF 7 SIGNALS ACTIVE",w-margin-208*u,69*u,12*u,{113,154,166,255});
+            text(font,std::to_string(active)+" OF "+std::to_string(progress.unlocked)+" SIGNALS ACTIVE",w-margin-208*u,69*u,12*u,{113,154,166,255});
+            if(!progress.complete())
+                text(font,std::to_string(TrackCount-progress.unlocked)+" STILL SEALED",w-margin-208*u,88*u,11*u,{126,110,150,255});
             for(int i=0;i<4;++i)DrawCircleV({w-margin-196*u+i*22*u,106*u},3*u,Fade({124,235,210,255},int(beat)%4==i&&mixer.playing?.95f:.18f));
             // Every track has a visible orbit, even while silent, so re-entry is discoverable.
             for(int i=0;i<TrackCount;++i) {
                 float orbit=radius*(layers.orbitBase+i*layers.orbitStep);
                 Color c=Colors[i];
+                if(!progress.isUnlocked(i)) {
+                    for(int j=0;j<160;j+=2) {
+                        float a=j*2*PI/160,b=(j+1)*2*PI/160;
+                        DrawLineEx({center.x+std::cos(a)*orbit,center.y+std::sin(a)*orbit*.56f},
+                                   {center.x+std::cos(b)*orbit,center.y+std::sin(b)*orbit*.56f},u,Fade({70,88,104,255},.16f));
+                    }
+                    continue;
+                }
                 for(int j=0;j<160;++j) {
                     float a=j*2*PI/160,b=(j+1)*2*PI/160;
                     DrawLineEx({center.x+std::cos(a)*orbit,center.y+std::sin(a)*orbit*.56f},
@@ -284,25 +333,49 @@ int main(int argc,char** argv) {
                 centered(font,std::to_string(i+1),nodes[i].x,nodes[i].y-5*u,10*u,{235,245,255,255});
                 if(hovered==i)centered(font,Names[i],nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
             }
+            if(sigilPulse>.012f) {
+                Color sc=Colors[frontier];float a=sigilPulse,rr=(13+2.5f*std::sin(motion*4))*u;
+                glow(sigil,rr*.5f,sc,a*.45f);
+                DrawCircleLinesV(sigil,rr,Fade(sc,a*.85f));
+                DrawCircleLinesV(sigil,rr*(1.5f+.25f*std::sin(motion*2.2f)),Fade(sc,a*.28f));
+                DrawLineEx({sigil.x+6*u,sigil.y-7*u},{sigil.x-3*u,sigil.y},2*u,Fade(sc,a));
+                DrawLineEx({sigil.x-3*u,sigil.y},{sigil.x+6*u,sigil.y+7*u},2*u,Fade(sc,a));
+                centered(font,onSigil?"UNSEAL":"LISTEN",sigil.x,sigil.y+rr+7*u,9*u,Fade(sc,a*.85f));
+            }
             float pulse=std::exp(-(beat-std::floor(beat))*5)*energy;
             glow(center,(30+energy*7+pulse*3)*u,{100,222,226,255},.22f+energy*.25f);
             DrawCircleLinesV(center,49*u,Fade({140,222,234,255},.18f+energy*.25f));
             DrawCircleLinesV(center,55*u,Fade({140,222,234,255},.1f));
             centered(font,"OD",center.x,center.y-12*u,24*u,{222,250,249,255});
-            centered(font,active?"THE SIGNAL IS YOURS":"SPACE TO BREATHE",center.x,center.y+radius*.69f,12*u,{143,173,185,255});
-            centered(font,"Click an orbit or a track below",center.x,center.y+radius*.69f+24*u,14*u,{102,129,149,255});
+            if(elapsed-unlockedAt<3.4) {
+                float age=float(elapsed-unlockedAt),a=std::min(1.f,(3.4f-age)*1.6f);
+                centered(font,unlockedName+" ANSWERS",center.x,center.y+radius*.69f,14*u,Fade({198,236,225,255},a));
+                centered(font,"a new signal joins the drift",center.x,center.y+radius*.69f+24*u,13*u,Fade({134,180,178,255},a*.8f));
+            } else {
+                centered(font,active?"THE SIGNAL IS YOURS":"SPACE TO BREATHE",center.x,center.y+radius*.69f,12*u,{143,173,185,255});
+                centered(font,progress.complete()?"Every signal is yours":"Listen for the sigil on the outer orbit",
+                         center.x,center.y+radius*.69f+24*u,14*u,{102,129,149,255});
+            }
             float rulerY=cardY-39*u;
             DrawLineEx({margin,rulerY},{w-margin,rulerY},u,{38,54,69,255});
-            DrawLineEx({margin,rulerY},{margin+(w-2*margin)*progress,rulerY},2*u,{117,193,188,255});
+            DrawLineEx({margin,rulerY},{margin+(w-2*margin)*loopPos,rulerY},2*u,{117,193,188,255});
             for(int i=0;i<=16;++i) {
                 float x=margin+(w-margin*2)*i/16;
                 DrawLineEx({x,rulerY-3*u},{x,rulerY+(i%4?3:6)*u},u,{69,91,103,255});
             }
             text(font,"16-BAR ORBIT",margin,rulerY-23*u,11*u,{113,145,164,255});
-            std::string bar="BAR "+std::to_string(std::min(16,int(progress*16)+1))+" / 16";
+            std::string bar="BAR "+std::to_string(std::min(16,int(loopPos*16)+1))+" / 16";
             text(font,bar,w-margin-89*u,rulerY-23*u,11*u,{144,178,191,255});
             for(int i=0;i<TrackCount;++i) {
                 Rectangle r=cards[i];bool on=mask&(1u<<i);Color c=Colors[i];float v=visibility[i];
+                if(!progress.isUnlocked(i)) {
+                    DrawRectangleRounded(r,.12f,8,{9,15,23,235});
+                    DrawRectangleRoundedLinesEx(r,.12f,8,u,{33,45,58,255});
+                    text(font,std::to_string(i+1),r.x+14*u,r.y+12*u,12*u,{60,76,92,255});
+                    text(font,"SEALED",r.x+r.width-54*u,r.y+12*u,11*u,{72,90,106,255});
+                    centered(font,"* * * * *",r.x+r.width*.5f,r.y+54*u,15*u,{47,62,77,255});
+                    continue;
+                }
                 DrawRectangleRounded(r,.12f,8,{12,21,34,240});
                 DrawRectangleRounded(r,.12f,8,Fade(c,(hovered==i?.12f:.045f)*v));
                 DrawRectangleRoundedLinesEx(r,.12f,8,u,Fade(c,(hovered==i?.7f:.25f)*v+.09f));
@@ -317,7 +390,7 @@ int main(int argc,char** argv) {
                     float a=(2+waves[i][j]*12)*u*(.28f+.72f*v);
                     DrawLineEx({x,r.y+91*u-a*.5f},{x,r.y+91*u+a*.5f},u,Fade(c,.14f+.5f*v));
                 }
-                float playX=r.x+13*u+progress*(r.width-26*u);
+                float playX=r.x+13*u+loopPos*(r.width-26*u);
                 DrawCircleV({playX,r.y+91*u},2*u,Fade(c,.3f+.7f*v));
             }
             auto button=[&](Rectangle r,const char* label){
