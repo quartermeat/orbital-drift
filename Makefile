@@ -3,7 +3,7 @@ RAYLIB := build/deps/raylib-5.5/src
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
 LDLIBS := $(RAYLIB)/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
 
-.PHONY: all setup run test check clean
+.PHONY: all setup run test check clean figures
 all: build/orbital-drift
 setup:
 	python3 scripts/setup.py
@@ -34,3 +34,8 @@ check: test all
 	./build/orbital-drift --check-assets
 run: all
 	./build/orbital-drift
+build/figure-sheet: tools/figure_sheet.cpp src/figure.hpp src/scene.hpp $(RAYLIB)/libraylib.a
+	mkdir -p build artifacts
+	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) $< -o $@ $(LDLIBS)
+figures: build/figure-sheet
+	./build/figure-sheet

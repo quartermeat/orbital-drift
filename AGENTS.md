@@ -131,6 +131,25 @@ Rules:
   silently returns the same stale frame under a compositor; seven "different"
   worlds came back byte-identical that way.
 
+## People
+
+`figure.hpp` draws a person: flat shapes, soft offset shadow, no outlines, no
+face, a half-circle skull cap for headwear, and 24 poses. `make figures` writes
+a sheet to `artifacts/figures.png` for judging it by eye.
+
+- **Oblique, never top-down.** Seen from straight above a person is a cap and
+  two shoulders with no character at all; the top-down variant was tried and
+  discarded. This means the top-down background map and the people want
+  different projections, so **zones should be drawn oblique** when they land.
+- **Limbs pivot at the joint**, not their middle, or a raised arm just spins in
+  place.
+- **~30px is the floor** for a figure to read; 40px crowds work well.
+- Legs with opposite signs stride, legs with the same sign fold to one side,
+  which is the only way a one-segment leg reads as sitting.
+- Lying down is deliberately absent. A standing figure turned on its side is
+  incoherent however it is pivoted, because the limbs turn with it; sunbathers
+  need their own draw path.
+
 ## Hot reload
 
 `assets/space.fs` and `assets/layers.conf` are watched by mtime and re-read
