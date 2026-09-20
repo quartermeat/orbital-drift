@@ -1,8 +1,8 @@
-"""Travel into a world and find the beacon: python3 scripts/check_canvas.py
+"""Find the person the find box shows: python3 scripts/check_find.py
 
-Descends into a track's artwork, then repeatedly zooms and re-centres the way a
-player would until the beacon is big enough to click, right-clicks it, and
-checks that finding it unseals the next track. Screenshots the canvas.
+Descends into a world, then zooms and re-centres the way a player would until
+the target is big enough to click, right-clicks their hit box, and checks that
+finding them unseals the next track.
 """
 from pathlib import Path
 import json
@@ -11,8 +11,8 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-STATE = ROOT / 'artifacts' / 'canvas.json'
-SHOT = ROOT / 'artifacts' / 'canvas.png'
+STATE = ROOT / 'artifacts' / 'find.json'
+SHOT = ROOT / 'artifacts' / 'find.png'
 
 
 def read(timeout=8.0):
@@ -29,7 +29,7 @@ def main():
     failures, summary = [], {}
     ROOT.joinpath('artifacts').mkdir(exist_ok=True)
     STATE.unlink(missing_ok=True)
-    with (ROOT / 'artifacts' / 'canvas.log').open('w') as log:
+    with (ROOT / 'artifacts' / 'find.log').open('w') as log:
         app = subprocess.Popen([str(ROOT / 'build/orbital-drift'), '--windowed', '--state', str(STATE),
                                 '--capture', str(SHOT), '--capture-after', '12', '--seconds', '80'],
                                stdout=log, stderr=subprocess.STDOUT)
@@ -120,14 +120,14 @@ def main():
                        'beacon_on_screen': reached['planet']['beacon_on_screen'],
                        'beacon_xy': [reached['planet']['beacon_x'], reached['planet']['beacon_y']]}
             if not reached['planet']['beacon_on_screen']:
-                failures.append('never brought the beacon on screen')
+                failures.append('never brought the target on screen')
             else:
                 rclick(reached['planet']['beacon_x'], reached['planet']['beacon_y'])
                 after = read()
                 summary['beacon_found'] = after['planet']['beacon_found']
                 summary['unlocked'] = after['progress']['unlocked']
                 if not after['planet']['beacon_found']:
-                    failures.append('right-clicking the beacon did not find it')
+                    failures.append('right-clicking the target did not find them')
                 if after['progress']['unlocked'] != 2:
                     failures.append(f"finding it did not unseal: {after['progress']['unlocked']}")
                 if after['rendered_frames'] <= landed['rendered_frames']:
@@ -149,7 +149,7 @@ def main():
         for failure in failures:
             print(f'FAIL: {failure}', file=sys.stderr)
         return 1
-    print('PASS: descend, pan and zoom in, beacon found, unseal, audio continuous, escape back')
+    print('PASS: descend, zoom to the target, right-click finds them, unseal, escape back')
     return 0
 
 

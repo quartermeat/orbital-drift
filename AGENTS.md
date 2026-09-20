@@ -109,8 +109,16 @@ towns — and `bakeScene` draws it once into a 2560x1440 render texture. After
 that the view is only ever panning and zooming an image, with zoom bounded
 between fitting the frame and 9x.
 
-Markers are small spires scattered on land. Exactly one wears the track's own
-colour, and that one is the beacon: right-click it to unseal the next track.
+**The hunt is for a person.** One of the world's ~500 people is the target; the
+find box renders that exact figure at the size it reaches at full zoom, so what
+you are shown is what you are looking for. They carry an invisible hit box
+(never smaller than a comfortable click) and right-clicking it unseals the next
+track. Generation guarantees nobody else wears the same outfit — shirt,
+trousers, pattern, stripe and cap — or the hunt has two right answers and no
+fair one. Spire waymarks on the land are scenery only.
+
+`person.hpp` holds people as pure data with no raylib so the scene generator
+can own them and stay testable; `figure.hpp` only draws.
 
 Zones that override the background at close zoom are the next layer and do not
 exist yet. The background is meant to still read at a distance.

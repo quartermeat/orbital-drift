@@ -9,6 +9,7 @@
 // are the same numbers. No raylib: generation stays testable without a window.
 #include "mixer.hpp"
 #include "hotreload.hpp"
+#include "person.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -17,21 +18,6 @@ namespace orbital {
 
 inline constexpr int SceneWidth = 2560, SceneHeight = 1440;
 inline constexpr int PaletteSize = 6;
-inline constexpr unsigned char BeaconPalette = 0;   // the track's own colour: the beacon alone wears it
-
-struct Rng {
-    uint64_t state;
-    explicit Rng(uint64_t seed) : state(seed * 6364136223846793005ull + 1442695040888963407ull) {}
-    uint32_t next() {
-        state = state * 6364136223846793005ull + 1442695040888963407ull;
-        uint32_t x = uint32_t(state >> 33);
-        x ^= x >> 15; x *= 2246822519u; x ^= x >> 13;
-        return x;
-    }
-    float unit() { return float(next() >> 8) / 16777216.f; }
-    float range(float low, float high) { return low + (high - low) * unit(); }
-    int below(int bound) { return bound > 0 ? int(next() % uint32_t(bound)) : 0; }
-};
 
 inline Rgb shade(Rgb base, float gain, float mix, Rgb toward) {
     auto blend = [&](unsigned char channel, unsigned char other) {
@@ -104,11 +90,10 @@ struct Blob { float x, y, r; unsigned char tone; };
 struct Patch { std::vector<Blob> blobs; };
 struct Field { float x, y, w, h, spin; unsigned char tone; int furrows; };
 struct Road { std::vector<std::pair<float, float>> points; };
-struct Marker { float x, y, size; unsigned char palette; bool beacon; };
+struct Marker { float x, y, size; unsigned char palette; };   // scenery: waymarks on the land
 // People are placed here but drawn live rather than baked into the texture, so
-// they stay sharp as you zoom instead of turning into magnified texels. Only
-// the seed is stored; what the person looks like is rolled from it at draw time.
-struct PersonSpot { float x, y, height; uint32_t seed; };
+// they stay sharp as you zoom instead of turning into magnified texels.
+struct PersonSpot { float x, y, height; Figure figure; };
 
 struct Scene {
     uint64_t seed = 0;
@@ -120,7 +105,7 @@ struct Scene {
     std::vector<Road> roads;
     std::vector<Marker> markers;
     std::vector<PersonSpot> people;
-    int beacon = -1;
+    int target = -1;   // the person the find box shows
     bool found = false;
 };
 
@@ -236,8 +221,7 @@ inline Scene generateScene(int track, Rgb trackColor) {
         }
     }
 
-    // Markers: small spires on land. Exactly one wears the track's own colour,
-    // and that one is the beacon.
+    // Waymarks: small spires dotted over the land, pure scenery.
     for (int attempt = 0; attempt < 2000 && int(scene.markers.size()) < 30; ++attempt) {
         float x = rng.range(SceneWidth * .05f, SceneWidth * .95f);
         float y = rng.range(SceneHeight * .06f, SceneHeight * .94f);
@@ -247,14 +231,14 @@ inline Scene generateScene(int track, Rgb trackColor) {
             crowded |= (other.x - x) * (other.x - x) + (other.y - y) * (other.y - y) < 150.f * 150.f;
         if (crowded) continue;
         scene.markers.push_back({x, y, rng.range(15.f, 23.f),
-                                 static_cast<unsigned char>(1 + rng.below(PaletteSize - 1)), false});
+                                 static_cast<unsigned char>(rng.below(PaletteSize))});
     }
     // People: crowded in the towns, strung along the roads, scattered over the
     // fields and the shoreline. At a person's real size they are specks until
     // you zoom, which is what makes zooming worth doing.
     auto addPerson = [&](float x, float y) {
         if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
-        scene.people.push_back({x, y, rng.range(11.f, 16.f), rng.next()});
+        scene.people.push_back({x, y, rng.range(11.f, 16.f), rollFigure(rng)});
     };
     for (const Town& town : scene.towns) {
         int count = 26 + rng.below(38);
@@ -289,17 +273,30 @@ inline Scene generateScene(int track, Rgb trackColor) {
     std::sort(scene.people.begin(), scene.people.end(),
               [](const PersonSpot& a, const PersonSpot& b) { return a.y < b.y; });
 
-    if (!scene.markers.empty()) {
-        scene.beacon = rng.below(int(scene.markers.size()));
-        scene.markers[size_t(scene.beacon)].palette = BeaconPalette;
-        scene.markers[size_t(scene.beacon)].beacon = true;
+    // One of them is the target the find box shows. Nobody else may wear the
+    // same outfit, or the hunt has two right answers and no fair one.
+    if (!scene.people.empty()) {
+        scene.target = rng.below(int(scene.people.size()));
+        const Figure& wanted = scene.people[size_t(scene.target)].figure;
+        for (int i = 0; i < int(scene.people.size()); ++i) {
+            if (i == scene.target) continue;
+            Figure& other = scene.people[size_t(i)].figure;
+            for (int guard = 0; guard < 8 && sameOutfit(wanted, other); ++guard) {
+                other.shirt = static_cast<unsigned char>(rng.below(ClothCount));
+                other.hat = static_cast<unsigned char>(rng.below(ClothCount));
+            }
+        }
     }
+
     return scene;
 }
 
-inline int countBeaconMatches(const Scene& scene) {
+// Nobody but the target may wear the target's outfit.
+inline int countOutfitMatches(const Scene& scene) {
+    if (scene.target < 0) return 0;
     int total = 0;
-    for (const Marker& marker : scene.markers) total += marker.palette == BeaconPalette ? 1 : 0;
+    for (const PersonSpot& spot : scene.people)
+        total += sameOutfit(scene.people[size_t(scene.target)].figure, spot.figure) ? 1 : 0;
     return total;
 }
 }

@@ -12,19 +12,20 @@ int main() {
         Rgb color{175,149,246};
         Scene a=generateScene(3,color),b=generateScene(3,color);
         require(a.towns.size()==b.towns.size()&&a.markers.size()==b.markers.size(),"a track always generates the same place");
-        require(a.beacon==b.beacon,"the beacon lands in the same spot");
+        require(a.target==b.target,"the target is the same person every run");
         require(!a.towns.empty()&&a.towns[0].x==b.towns[0].x,"town layout is stable");
 
         require(a.towns.size()>=3,"a world has several towns");
         require(a.woods.size()>=10,"a world has woodland");
         require(!a.fields.empty(),"a world has farmland");
         require(a.roads.size()==a.towns.size()-1,"every town is joined by a road");
-        require(a.markers.size()>=12,"enough markers for the beacon to hide among");
+        require(a.markers.size()>=12,"the land has waymarks on it");
 
-        // The whole hunt: exactly one marker wears the track's own colour.
-        require(countBeaconMatches(a)==1,"exactly one marker is the beacon");
-        require(a.beacon>=0&&a.markers[size_t(a.beacon)].beacon,"the beacon is flagged");
-        require(a.markers[size_t(a.beacon)].palette==BeaconPalette,"the beacon wears the track colour");
+        // The whole hunt: one person, and nobody else dressed like them.
+        require(a.people.size()>300,"a world is properly populated");
+        require(a.target>=0&&a.target<int(a.people.size()),"the target is a real person");
+        require(countOutfitMatches(a)==1,"nobody else wears the target's outfit");
+        require(a.people[size_t(a.target)].height>8,"the target is a normal-sized person");
 
         // Nothing may sit in the sea, or the place stops reading as a place.
         for (const Town& town:a.towns) {
@@ -33,7 +34,9 @@ int main() {
                 require(elevationAt(a.seed,building.x,building.y)>ShoreLevel,"buildings stand on land");
         }
         for (const Marker& marker:a.markers)
-            require(elevationAt(a.seed,marker.x,marker.y)>ShoreLevel,"markers stand on land");
+            require(elevationAt(a.seed,marker.x,marker.y)>ShoreLevel,"waymarks stand on land");
+        for (const PersonSpot& spot:a.people)
+            require(elevationAt(a.seed,spot.x,spot.y)>SeaLevel,"nobody stands in deep water");
         for (const Patch& patch:a.woods)
             for (const Blob& blob:patch.blobs)
                 require(elevationAt(a.seed,blob.x,blob.y)>ShoreLevel,"trees stand on land");
@@ -60,13 +63,13 @@ int main() {
         std::map<long long,int> places;
         for (int track=0;track<TrackCount;++track) {
             Scene s=generateScene(track,color);
-            require(countBeaconMatches(s)==1,"every world has exactly one beacon");
+            require(countOutfitMatches(s)==1,"every world has exactly one target");
             require(!s.towns.empty(),"every world has a town");
             ++places[(long long)(s.towns[0].x)*100000+(long long)(s.towns[0].y)];
         }
         require(places.size()==size_t(TrackCount),"every world has its own layout");
 
-        std::cout<<"PASS: determinism, towns/roads/woods/fields, one beacon, all on land, sea and land, distinct worlds\n";
+        std::cout<<"PASS: determinism, towns/roads/woods/fields, unique target outfit, all on land, distinct worlds\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr<<"FAIL: "<<error.what()<<'\n';

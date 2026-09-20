@@ -1,7 +1,8 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
 #include "progress.hpp"
-#include "figure.hpp"   // brings in scene.hpp
+#include "scene.hpp"
+#include "figure.hpp"
 #include "raylib.h"
 #include "raymath.h"   // must follow raylib.h: it uses raylib's vector types
 #include "rlgl.h"
@@ -118,7 +119,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.9.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.10.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -171,7 +172,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.9.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.10.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --world N --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -346,14 +347,17 @@ int main(int argc,char** argv) {
                 viewY=std::clamp(viewY,-marginY,SceneHeight+marginY);
                 zoomLevel=viewScale/fit;viewCenterX=viewX;viewCenterY=viewY;
 
-                const Marker& target=scene.markers[size_t(scene.beacon)];
+                const PersonSpot& target=scene.people[size_t(scene.target)];
                 beaconWorldX=target.x;beaconWorldY=target.y;
                 double beaconScreenX=screenX(target.x),beaconScreenY=screenY(target.y);
-                double beaconPixels=target.size*viewScale;
+                double beaconPixels=target.height*viewScale;
                 beaconOnScreen=beaconScreenX>0&&beaconScreenY>0&&beaconScreenX<w&&beaconScreenY<h;
                 beaconX=float(beaconScreenX);beaconY=float(beaconScreenY);beaconFound=scene.found;
-                bool overBeacon=beaconOnScreen
-                    &&Vector2Distance(pointer,{float(beaconScreenX),float(beaconScreenY)})<float(std::max(15.0,beaconPixels));
+                // An invisible box around the target, drawn feet-up and never
+                // smaller than a comfortable click.
+                float hitW=std::max(18.f,float(beaconPixels)*.62f),hitH=std::max(20.f,float(beaconPixels));
+                Rectangle hitBox{float(beaconScreenX)-hitW*.5f,float(beaconScreenY)-hitH,hitW,hitH};
+                bool overBeacon=beaconOnScreen&&CheckCollisionPointRec(pointer,hitBox);
                 if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)&&!scene.found) {
                     if(overBeacon) {
                         scene.found=beaconFound=true;
@@ -443,19 +447,16 @@ int main(int argc,char** argv) {
                     if(sx<-px*2||sy<-px*2||sx>w+px*2||sy>h+px*2)continue;
                     ++drawnPeople;
                     if(px<9.f) {    // below this a body is unreadable anyway: a mark will do
-                        Rng quick(spot.seed);
-                        Color tint=ClothTones[quick.below(ClothCount)];
                         DrawRectangleRec({float(sx-px*.22),float(sy-px*.75),
-                                          std::max(1.f,px*.44f),std::max(1.f,px*.8f)},tint);
+                                          std::max(1.f,px*.44f),std::max(1.f,px*.8f)},
+                                         toColor(ClothTones[spot.figure.shirt]));
                         continue;
                     }
-                    Rng roll(spot.seed);
-                    drawFigure(rollFigure(roll),{float(sx),float(sy)},px);
+                    drawFigure(spot.figure,{float(sx),float(sy)},px);
                 }
 
                 float pad=38*u;
-                Rgb wantedRgb=scene.palette[BeaconPalette];
-                Color want{wantedRgb.r,wantedRgb.g,wantedRgb.b,255};
+                Color want=toColor(scene.palette[0]);   // the track's own colour, used for the find box trim
                 if(scene.found) {
                     float ring=float(std::max(20.0,beaconPixels*1.8))+4*std::sin(float(elapsed)*3);
                     DrawCircleLinesV({float(beaconScreenX),float(beaconScreenY)},ring,Fade({208,244,228,255},.9f));
@@ -464,19 +465,26 @@ int main(int argc,char** argv) {
                     DrawCircleLinesV({float(beaconScreenX),float(beaconScreenY)},
                                      float(std::max(16.0,beaconPixels*1.6)),Fade(want,.55f));
                 }
-                DrawRectangleRounded({pad-16*u,pad-24*u,430*u,98*u},.08f,8,Fade(edge,.72f));
+                DrawRectangleRounded({pad-16*u,pad-24*u,470*u,98*u},.08f,8,Fade(edge,.94f));
                 text(font,options.gallery?"GALLERY":"WORLD",pad,pad-10*u,12*u,{118,150,172,255});
                 text(font,Names[planetTrack],pad,pad+8*u,34*u,{231,238,244,255});
                 text(font,scene.found?"This world has given up its secret"
                                      :(options.gallery?"1-7 switch worlds. Drag to pan, wheel to zoom."
-                                                      :"One marker wears this colour. Zoom in and look."),
+                                                      :"Someone down there is dressed like this. Zoom in and look."),
                      pad,pad+50*u,13*u,{136,162,182,255});
-                float cardW=196*u,cardH=112*u,cardX=w-pad-cardW,cardTop=pad-14*u;
-                DrawRectangleRounded({cardX,cardTop,cardW,cardH},.1f,8,{10,17,27,232});
+                // The find box shows the target at the size it reaches at full
+                // zoom, so what you are hunting for is exactly what you will see.
+                float portrait=std::max(96*u,float(target.height*fit*9.0)*1.45f);
+                float cardW=std::max(188*u,portrait*1.5f),cardH=portrait+74*u;
+                float cardX=w-pad-cardW,cardTop=pad-14*u;
+                DrawRectangleRounded({cardX,cardTop,cardW,cardH},.1f,8,{10,17,27,236});
                 DrawRectangleRoundedLinesEx({cardX,cardTop,cardW,cardH},.1f,8,u,Fade(want,.45f));
                 text(font,"FIND",cardX+14*u,cardTop+11*u,11*u,{132,160,180,255});
-                DrawPoly({cardX+cardW*.5f,cardTop+62*u},3,25*u,-90,want);
-                centered(font,"A MARKER, THIS COLOUR",cardX+cardW*.5f,cardTop+88*u,10*u,Fade(want,.85f));
+                DrawRectangleRounded({cardX+cardW*.5f-portrait*.42f,cardTop+30*u,portrait*.84f,portrait+6*u},
+                                     .08f,6,Fade(Color{scene.grass.r,scene.grass.g,scene.grass.b,255},.30f));
+                drawFigure(target.figure,{cardX+cardW*.5f,cardTop+30*u+portrait},portrait);
+                centered(font,scene.found?"FOUND":"THIS PERSON",cardX+cardW*.5f,cardTop+cardH-24*u,11*u,
+                         scene.found?Color{170,232,200,255}:Fade(want,.9f));
                 float mapSize=118*u,mapX=w-pad-mapSize,mapY=h-pad-mapSize;
                 DrawRectangleRec({mapX,mapY,mapSize,mapSize*float(SceneHeight)/SceneWidth},Fade({8,13,21,255},.86f));
                 DrawRectangleLinesEx({mapX,mapY,mapSize,mapSize*float(SceneHeight)/SceneWidth},u,Fade(want,.3f));
