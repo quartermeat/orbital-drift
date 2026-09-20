@@ -37,7 +37,6 @@ struct LayerConfig {
     std::array<std::string, TrackCount> roles = {"ATMOSPHERE","MELODY","TEXTURE","LOW END","PULSE","BACKBEAT","MOVEMENT"};
     int starCount = 260;
     float orbitBase = .43f, orbitStep = .092f, glowScale = 1.f, energyGain = 7.f;
-    float sigilLevel = .45f;   // fraction of a track's own recent peak that counts as sounding
     std::string note;   // parse warning, empty when clean
 };
 
@@ -84,7 +83,6 @@ inline LayerConfig loadLayerConfig(const fs::path& path) {
     config.orbitStep = number("orbit.step", .092f);
     config.glowScale = number("glow.scale", 1.f);
     config.energyGain = number("energy.gain", 7.f);
-    config.sigilLevel = std::clamp(number("sigil.level", .45f), .02f, .99f);
     for (int i = 0; i < TrackCount; ++i) {
         std::string prefix = "track." + std::to_string(i + 1) + '.';
         auto role = values.find(prefix + "role");

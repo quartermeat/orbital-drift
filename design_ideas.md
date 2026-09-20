@@ -22,13 +22,11 @@ working against it.
 Seven tracks, seven toggles, seven visual layers. State is a 7-bit word — 128
 combinations, of which a puzzle accepts some small number.
 
-**Decided: tracks unlock right to left.** A run opens with only track 7 and
-every other track sealed. The leftmost unlocked track carries a sigil on its
-orbit, visible only while that track is switched on *and* audibly sounding;
-clicking it unseals the track to its left. Because each stem's rhythm sets how
-often it sounds, difficulty comes from the music itself — Orbit Hats plays
-constant eighths so its sigil is easy to catch, while Distant Snare hits beat 3
-of alternate bars, so its window is a flash you wait a loop for.
+**Decided: a run begins in silence and tracks unlock right to left.** Only
+track 7 is available; everything else is sealed. Switching a track on exposes
+its visual layer, and the layer carries a sigil — right-click it to unseal the
+track to its left. Exposure is the only condition: no timing, no rhythmic gate.
+The act of turning a layer on is what reveals what it hides.
 
 That also means the run *starts* sparse and rhythmic and *ends* with the
 harmonic bed, so the world gains atmosphere as it fills in.

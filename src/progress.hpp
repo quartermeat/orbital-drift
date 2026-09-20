@@ -3,7 +3,8 @@
 // (the frontier) carries a clue, and solving it unlocks the track to its left.
 //
 // Locked tracks are silent and cannot be toggled, so the mix itself is the
-// record of how far the player has come.
+// record of how far the player has come. A run begins in silence: the one
+// available track must be switched on before its layer, and its clue, exist.
 #include "mixer.hpp"
 
 namespace orbital {
@@ -49,18 +50,4 @@ inline void saveProgress(const fs::path& path, const Progress& progress) {
     { std::ofstream out(temp); out << "{\"unlocked\":" << progress.unlocked << "}\n"; }
     fs::rename(temp, path, code);
 }
-
-// A track's sigil is visible only while that track is actually sounding, so a
-// sparse part gives a brief window and a busy one gives a wide one. The
-// reference level decays, so this self-calibrates to each stem's own loudness
-// instead of needing a hand-tuned threshold per track.
-struct Audibility {
-    std::array<float, TrackCount> reference{};
-
-    bool sounding(int index, float level, float dt, float fraction) {
-        float& peak = reference[index];
-        peak = std::max(level, peak - peak * std::min(1.f, dt * .35f));
-        return peak > 1e-4f && level > peak * fraction;
-    }
-};
 }

@@ -41,18 +41,7 @@ int main() {
         require(loadProgress(path).unlocked==1,"a negative save is clamped");
         fs::remove(path);
 
-        // The sigil follows each stem's own loudness, so a quiet track is not
-        // permanently unreadable and a loud one is not permanently open.
-        Audibility a;
-        require(!a.sounding(0,0.f,.016f,.45f),"silence never shows the sigil");
-        for (int i=0;i<200;++i) a.sounding(0,.02f,.016f,.45f);
-        require(a.sounding(0,.02f,.016f,.45f),"a track at its own level shows the sigil");
-        require(!a.sounding(0,.004f,.016f,.45f),"a track well under its own level hides it");
-        Audibility quiet;
-        for (int i=0;i<200;++i) quiet.sounding(3,.0006f,.016f,.45f);
-        require(quiet.sounding(3,.0006f,.016f,.45f),"a quiet stem still reaches its own threshold");
-
-        std::cout<<"PASS: unlock order, mask, clamping, persistence, corrupt saves, self-calibrating sigil\n";
+        std::cout<<"PASS: unlock order, mask, clamping, persistence, corrupt saves\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr<<"FAIL: "<<error.what()<<'\n';

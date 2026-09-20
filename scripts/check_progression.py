@@ -1,8 +1,9 @@
 """Play the unlock loop for real: python3 scripts/check_progression.py
 
-Starts a fresh run, confirms sealed tracks refuse to sound, waits for the
-frontier sigil to appear, clicks it, and confirms the unlock persists across a
-restart. Uses xdotool against a real window.
+Confirms a run starts silent with one track unsealed, that a sealed track
+refuses input, that switching the open track on exposes its sigil, that a right
+click unseals the next track, and that a launch resets unless --resume is
+given. Uses xdotool against a real window.
 """
 from pathlib import Path
 import json
@@ -50,7 +51,7 @@ def main():
     STATE.unlink(missing_ok=True)
 
     with (ROOT / 'artifacts' / 'progression.log').open('w') as log:
-        app = launch(log, ['--reset-progress'])
+        app = launch(log)
         try:
             window = window_for(app.pid)
             time.sleep(2.5)
@@ -63,33 +64,74 @@ def main():
             open_now = [t['name'] for t in first['tracks'] if t['unlocked']]
             if open_now != ['Orbit Hats']:
                 failures.append(f'unlocked set was {open_now}')
-            if any(t['enabled'] for t in first['tracks'] if not t['unlocked']):
-                failures.append('a sealed track was sounding')
+            if any(t['enabled'] for t in first['tracks']):
+                failures.append('a run did not start silent')
+            if first['progress']['sigil_visible']:
+                failures.append('the sigil was exposed before its track was switched on')
 
-            # A sealed track must refuse the key that would toggle it.
             geometry = subprocess.check_output(['xdotool', 'getwindowgeometry', '--shell', window], text=True)
             info = dict(line.split('=', 1) for line in geometry.strip().splitlines())
-            subprocess.run(['xdotool', 'windowactivate', '--sync', window, 'key', '--window', window, '1'], check=True)
+
+            def key(name):
+                subprocess.run(['xdotool', 'windowactivate', '--sync', window, 'windowfocus', '--sync', window,
+                                'keydown', '--clearmodifiers', name], check=True)
+                # Hold through several frames: XTEST's default 12 ms tap can
+                # begin and end between the 60 Hz renderer's input polls.
+                time.sleep(.08)
+                subprocess.run(['xdotool', 'keyup', name], check=True)
+
+            def click(button):
+                # --window makes the move client-relative, avoiding the frame
+                # offset that xdotool's absolute X/Y carries on reparented
+                # windows. Press and release are held apart for the same reason
+                # keys are: a 12 ms XTEST tap can land entirely between two of
+                # the 60 Hz renderer's input polls.
+                subprocess.run(['xdotool', 'windowactivate', '--sync', window,
+                                'mousemove', '--window', window, str(sigil_x), str(sigil_y)], check=True)
+                time.sleep(.2)
+                subprocess.run(['xdotool', 'mousedown', str(button)], check=True)
+                time.sleep(.08)
+                subprocess.run(['xdotool', 'mouseup', str(button)], check=True)
+
+            # Where the app actually drew it, not a second copy of the layout maths.
+            sigil_x = sigil_y = 0
+
+            # Wake the open track FIRST. This proves key injection works, so the
+            # sealed-track check below cannot pass just because nothing arrived.
+            key('7')
+            time.sleep(1.2)
+            woken = read(STATE)
+            if not any(t['name'] == 'Orbit Hats' and t['enabled'] for t in woken['tracks']):
+                failures.append('pressing 7 did not wake the unsealed track')
+            if not woken['progress']['sigil_visible']:
+                failures.append('sigil was not exposed once its track was on')
+
+            # Now a sealed track must refuse the same, proven mechanism.
+            key('1')
             time.sleep(1.0)
             if read(STATE)['tracks'][0]['enabled']:
                 failures.append('pressing 1 enabled a sealed track')
 
-            # Wait for the sigil, then click it.
-            x, y, w, h = (int(info[k]) for k in ('X', 'Y', 'WIDTH', 'HEIGHT'))
-            radius = min(w * .31, h * .34)
-            sigil_x = x + w * .5 - radius * (.43 + 6 * .092)
-            sigil_y = y + h * .435
-            deadline = time.time() + 30
-            clicked = False
-            while time.time() < deadline and not clicked:
-                if read(STATE)['progress']['sigil_visible']:
-                    subprocess.run(['xdotool', 'mousemove', str(int(sigil_x)), str(int(sigil_y)),
-                                    'click', '1'], check=True)
-                    time.sleep(.8)
-                    clicked = read(STATE)['progress']['unlocked'] > 1
-                time.sleep(.15)
-            if not clicked:
-                failures.append('sigil never became clickable within 30s')
+            # Switching the layer off must hide the sigil with it.
+            key('7')
+            time.sleep(1.2)
+            if read(STATE)['progress']['sigil_visible']:
+                failures.append('sigil stayed exposed after its track was switched off')
+            key('7')
+            time.sleep(1.2)
+            if not read(STATE)['progress']['sigil_visible']:
+                failures.append('sigil did not come back when the track returned')
+
+            # Right click unseals; a left click must not.
+            live = read(STATE)
+            sigil_x, sigil_y = live['progress']['sigil_x'], live['progress']['sigil_y']
+            click(1)
+            time.sleep(1.0)
+            if read(STATE)['progress']['unlocked'] != 1:
+                failures.append('a left click unsealed a track; only right click should')
+            print(f'sigil at ({sigil_x},{sigil_y}) in a {info["WIDTH"]}x{info["HEIGHT"]} window')
+            click(3)
+            time.sleep(1.0)
 
             after = read(STATE)
             if after['progress']['unlocked'] != 2:
@@ -108,14 +150,14 @@ def main():
             except subprocess.TimeoutExpired:
                 app.kill()
 
-        # Progress must survive a restart.
+        # A plain launch starts over; --resume picks the saved run back up.
         app = launch(log)
         try:
             window_for(app.pid)
             time.sleep(2.5)
-            resumed = read(STATE)
-            if resumed['progress']['unlocked'] != 2:
-                failures.append(f"restart lost progress: {resumed['progress']['unlocked']}")
+            restarted = read(STATE)
+            if restarted['progress']['unlocked'] != 1:
+                failures.append(f"a plain relaunch resumed at {restarted['progress']['unlocked']}, expected a reset")
         finally:
             app.terminate()
             try:
@@ -123,14 +165,33 @@ def main():
             except subprocess.TimeoutExpired:
                 app.kill()
 
-    print(json.dumps({'saved_file': saved, 'unlocked_after_click': after['progress']['unlocked'],
-                      'frontier_after_click': after['progress']['frontier'],
-                      'unlocked_after_restart': resumed['progress']['unlocked']}, indent=2))
+        # The reset above overwrote the save, so re-earn an unlock to test resume.
+        PROGRESS.write_text('{"unlocked":3}\n')
+        app = launch(log, ['--resume'])
+        try:
+            window_for(app.pid)
+            time.sleep(2.5)
+            resumed = read(STATE)
+            if resumed['progress']['unlocked'] != 3:
+                failures.append(f"--resume gave {resumed['progress']['unlocked']}, expected 3")
+            if any(t['enabled'] for t in resumed['tracks']):
+                failures.append('a resumed run did not start silent')
+        finally:
+            app.terminate()
+            try:
+                app.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                app.kill()
+
+    print(json.dumps({'unlocked_after_right_click': after['progress']['unlocked'],
+                      'frontier_after_right_click': after['progress']['frontier'],
+                      'plain_relaunch': restarted['progress']['unlocked'],
+                      'with_resume': resumed['progress']['unlocked']}, indent=2))
     if failures:
         for failure in failures:
             print(f'FAIL: {failure}', file=sys.stderr)
         return 1
-    print('PASS: sealed tracks refuse input, sigil unseals, audio continuous, progress persists')
+    print('PASS: silent start, sealed input refused, layer exposes sigil, right-click unseals, reset by default, --resume works')
     return 0
 
 

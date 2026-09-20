@@ -23,6 +23,8 @@ static int configReloads=0,shaderReloads=0;
 static std::string reloadError;
 static Progress progress;
 static bool sigilVisible=false;
+static float sigilX=0,sigilY=0,mouseX=0,mouseY=0;
+static bool sigilHot=false;
 static void applyLayers() {
     for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
 }
@@ -47,7 +49,7 @@ struct Options {
     fs::path state=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"state.json";
     fs::path capture;
     fs::path progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"progress.json";
-    bool windowed=false,check=false,reset=false;
+    bool windowed=false,check=false,resume=false;
     double seconds=0;
 };
 static std::string quote(const std::string& s) {
@@ -73,7 +75,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.3.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.4.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -85,7 +87,9 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
        <<",\"last_error\":"<<quote(reloadError)<<"}"
        <<",\"progress\":{\"unlocked\":"<<progress.unlocked<<",\"frontier\":"<<quote(Names[progress.frontier()])
        <<",\"next_locked\":"<<(progress.nextLocked()>=0?quote(Names[progress.nextLocked()]):std::string("null"))
-       <<",\"sigil_visible\":"<<(sigilVisible?"true":"false")<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
+       <<",\"sigil_visible\":"<<(sigilVisible?"true":"false")
+       <<",\"sigil_x\":"<<int(sigilX)<<",\"sigil_y\":"<<int(sigilY)
+       <<",\"sigil_hot\":"<<(sigilHot?"true":"false")<<",\"mouse_x\":"<<int(mouseX)<<",\"mouse_y\":"<<int(mouseY)<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
        <<",\"tracks\":[";
     uint32_t mask=mixer.enabled;
     for(int i=0;i<TrackCount;++i) {
@@ -109,14 +113,14 @@ int main(int argc,char** argv) {
             auto value=[&](){if(i+1>=argc)throw std::runtime_error("Missing value for "+arg);return std::string(argv[++i]);};
             if(arg=="--windowed")options.windowed=true;
             else if(arg=="--check-assets")options.check=true;
-            else if(arg=="--reset-progress")options.reset=true;
+            else if(arg=="--resume")options.resume=true;
             else if(arg=="--assets")options.assets=fs::absolute(value());
             else if(arg=="--state")options.state=fs::absolute(value());
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.3.0\nDefault: fullscreen. Click cards/orbs or 1-7 toggle tracks.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
-                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --reset-progress\n";return 0;
+                std::cout<<"Orbital Drift 0.4.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
         mixer.load(options.assets/"audio");
@@ -151,10 +155,13 @@ int main(int argc,char** argv) {
         std::cout<<"[graphics] "<<gpu<<" / "<<glString(GL_VERSION)<<std::endl;
         if(!fs::exists(options.assets/"font.ttf")||!fs::exists(options.assets/"space.fs"))
             throw std::runtime_error("Missing graphics assets; run python3 scripts/setup.py");
-        if(options.reset){std::error_code code;fs::remove(options.progressFile,code);}
-        progress=loadProgress(options.progressFile);
-        mixer.enabled=progress.mask();
-        std::cout<<"[progress] "<<progress.unlocked<<" of "<<TrackCount<<" signals unlocked; frontier "<<Names[progress.frontier()]<<std::endl;
+        // State is saved every run, but a launch starts over unless --resume
+        // asks for the previous one; resuming matters later, not yet.
+        progress=options.resume?loadProgress(options.progressFile):Progress{};
+        saveProgress(options.progressFile,progress);
+        mixer.enabled=0;   // the drift begins in silence
+        std::cout<<"[progress] "<<progress.unlocked<<" of "<<TrackCount<<" unlocked; frontier "<<Names[progress.frontier()]
+                 <<(options.resume?" (resumed)":" (fresh run)")<<"; starting silent"<<std::endl;
         layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
         if(!layers.note.empty())std::cout<<"[config] "<<layers.note<<std::endl;
         Font font=LoadFontEx((options.assets/"font.ttf").c_str(),72,nullptr,0);
@@ -190,8 +197,6 @@ int main(int argc,char** argv) {
         };
         makeStars();
         std::array<float,TrackCount> visibility{},meter{};
-        for(int i=0;i<TrackCount;++i)visibility[i]=progress.isUnlocked(i)?1.f:0.f;
-        Audibility audible;
         double unlockedAt=-9;std::string unlockedName;
         float sigilPulse=0;
         double started=GetTime(),lastState=-1,toastAt=-9;
@@ -262,17 +267,21 @@ int main(int argc,char** argv) {
                 else{int mon=GetCurrentMonitor();SetWindowSize(GetMonitorWidth(mon),GetMonitorHeight(mon));ToggleFullscreen();}
             }
             mask=mixer.enabled;
-            // The clue lives on the frontier track's orbit and only answers
-            // while that track is actually sounding, so finding it is listening.
+            // The clue lives on the frontier track's orbit, exposed with the
+            // rest of that track's layer whenever the track is switched on.
             int frontier=progress.frontier();
             float sigilOrbit=radius*(layers.orbitBase+frontier*layers.orbitStep);
             Vector2 sigil{center.x-sigilOrbit,center.y};
+            sigilX=sigil.x;sigilY=sigil.y;mouseX=mouse.x;mouseY=mouse.y;
             bool frontierOn=(mask>>frontier)&1u;
-            sigilVisible=!progress.complete()&&frontierOn
-                &&audible.sounding(frontier,mixer.levels[frontier].load(),dt,layers.sigilLevel);
+            // The layer is exposed whenever its track is on, and the sigil is
+            // part of that layer. No timing window: switch the track on, and
+            // the clue is there to be found.
+            sigilVisible=!progress.complete()&&frontierOn;
             sigilPulse+=((sigilVisible?1.f:0.f)-sigilPulse)*(1-std::exp(-dt*9));
-            bool onSigil=sigilVisible&&hovered<0&&CheckCollisionPointCircle(mouse,sigil,26*u);
-            if(onSigil&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            bool onSigil=sigilVisible&&CheckCollisionPointCircle(mouse,sigil,26*u);
+            sigilHot=onSigil;
+            if(onSigil&&IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
                 unlockedName=Names[progress.nextLocked()];
                 progress.advance();
                 saveProgress(options.progressFile,progress);
@@ -340,7 +349,7 @@ int main(int argc,char** argv) {
                 DrawCircleLinesV(sigil,rr*(1.5f+.25f*std::sin(motion*2.2f)),Fade(sc,a*.28f));
                 DrawLineEx({sigil.x+6*u,sigil.y-7*u},{sigil.x-3*u,sigil.y},2*u,Fade(sc,a));
                 DrawLineEx({sigil.x-3*u,sigil.y},{sigil.x+6*u,sigil.y+7*u},2*u,Fade(sc,a));
-                centered(font,onSigil?"UNSEAL":"LISTEN",sigil.x,sigil.y+rr+7*u,9*u,Fade(sc,a*.85f));
+                centered(font,onSigil?"RIGHT-CLICK TO UNSEAL":"SIGIL",sigil.x,sigil.y+rr+7*u,9*u,Fade(sc,a*.85f));
             }
             float pulse=std::exp(-(beat-std::floor(beat))*5)*energy;
             glow(center,(30+energy*7+pulse*3)*u,{100,222,226,255},.22f+energy*.25f);
@@ -353,7 +362,7 @@ int main(int argc,char** argv) {
                 centered(font,"a new signal joins the drift",center.x,center.y+radius*.69f+24*u,13*u,Fade({134,180,178,255},a*.8f));
             } else {
                 centered(font,active?"THE SIGNAL IS YOURS":"SPACE TO BREATHE",center.x,center.y+radius*.69f,12*u,{143,173,185,255});
-                centered(font,progress.complete()?"Every signal is yours":"Listen for the sigil on the outer orbit",
+                centered(font,progress.complete()?"Every signal is yours":(active?"A sigil waits on the lit orbit":"Wake a signal to see its layer"),
                          center.x,center.y+radius*.69f+24*u,14*u,{102,129,149,255});
             }
             float rulerY=cardY-39*u;

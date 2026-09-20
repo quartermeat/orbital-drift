@@ -25,7 +25,7 @@ make run      # fullscreen
 
 python3 scripts/check_controls.py     # drives real input against a live window
 python3 scripts/check_hot_reload.py   # edits assets under a live session
-python3 scripts/check_progression.py  # clicks the sigil and checks the unlock persists
+python3 scripts/check_progression.py  # right-clicks the sigil and checks the unlock
 ```
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
@@ -59,42 +59,43 @@ beat 0.8333 s, bar 3.3333 s, loop 53.3333 s / 2,560,000 frames.
 
 ## Progression
 
-Tracks unlock **right to left**. A fresh run opens only track 7 (Orbit Hats);
-every other track is sealed — silent, un-toggleable, its name hidden. The
-leftmost unlocked track is the *frontier*, and its layer carries the clue that
-opens the track to its left.
+**A run begins in silence.** Nothing plays until the player switches on the one
+available track. Tracks unlock **right to left**: a fresh run opens only track 7
+(Orbit Hats); every other track is sealed — silent, un-toggleable, its name
+hidden. The leftmost unlocked track is the *frontier*.
 
-The clue is a **sigil** on the frontier track's orbit, at the leftmost point of
-the ellipse, pointing toward the sealed tracks. It appears only while that
-track is both switched on and **audibly sounding**, so the puzzle is solved by
-listening rather than hunting pixels. Clicking it unseals the next track, which
-starts sounding immediately.
+A track's **visual layer is exposed exactly while that track is switched on**,
+and the layer carries a **sigil** on its orbit, at the point nearest the sealed
+tracks. **Right-click the sigil to unseal** the next track, which joins the mix
+immediately and moves the frontier one step left.
 
 Rules:
 
+- **Exposure is the only condition.** The sigil is visible whenever its track is
+  on, and hidden when it is off. There is no timing window and no rhythmic
+  gate — the clue is found by switching a layer on and looking, not by waiting
+  for a moment. An earlier build gated it on the track being audibly sounding;
+  that was removed deliberately, so do not reintroduce a timing condition.
+- **Left click toggles, right click unseals.** Keeping them on separate buttons
+  is what lets the sigil sit anywhere in a layer without colliding with the
+  node and card hit boxes.
 - **Unlock order is fixed and derived, never stored per track.** `Progress`
   holds one integer; `isUnlocked(i)` is `i >= TrackCount - unlocked`. Do not
   add a per-track unlocked flag — one integer is the whole save file.
-- **A sealed track must never sound.** It cannot be toggled, and `ALL ON` /
-  `M` use `progress.mask()`, not `AllTracks`. A sealed track appearing in the
-  mix is the bug this design most needs protecting from.
-- **Audibility is self-calibrating.** `Audibility::sounding` compares a track
-  to a decaying record of *its own* recent peak. Never hardcode a level
-  threshold: the stems span roughly 19 dB (Soft Kick −10.5, Cosmic Dust −29.1),
-  so any fixed value makes quiet tracks unsolvable and loud ones trivial.
-- **Difficulty is data.** `sigil.level` in `layers.conf` sets what fraction of
-  its own peak counts as sounding, and hot-reloads, so it can be tuned against
-  live audio without a rebuild.
-- **Losing progress must never block launching.** A missing or corrupt
-  `artifacts/progress.json` silently starts a fresh run; out-of-range values
-  are clamped. `--reset-progress` starts over deliberately.
+- **A sealed track must never sound.** It cannot be toggled, and `ALL ON` / `M`
+  use `progress.mask()`, not `AllTracks`. A sealed track appearing in the mix is
+  the bug this design most needs protecting from.
+- **State is saved every run, but a launch starts over.** `--resume` opts into
+  the previous run. Resuming will matter once progression is long enough to be
+  worth keeping; until then a predictable fresh start is worth more in testing.
+  A missing or corrupt save starts fresh rather than failing, and out-of-range
+  values are clamped.
 
-The musical consequence is worth knowing: right-to-left means the run *starts*
+The musical consequence is worth knowing: right-to-left means a run *starts*
 with Orbit Hats (swung eighths) and *ends* with Nebula Pad (the harmonic bed),
-so the world gains atmosphere as it fills in, inverting the usual build. That
-was a deliberate reading of "first track from right to left" — if the intent
-was to begin with the pad, the order reverses and the sigil moves to the
-rightmost orbit.
+so the world gains atmosphere as it fills in, inverting the usual build. If the
+intent was to begin with the pad, the order reverses and the sigil moves to the
+innermost orbit.
 
 ## Hot reload
 
@@ -146,12 +147,25 @@ Per the home guide's mission, this app is driven headlessly by agents:
 `--seconds N --capture out.png --state out.json` renders, screenshots, dumps
 state, and exits.
 
+`--state` also publishes the sigil's position and hover state and the pointer
+location, so a driving script never has to duplicate the layout maths to know
+where to click. Extend that habit rather than recomputing geometry in Python.
+
+**Driving the app with xdotool:** hold press and release ~80 ms apart for both
+keys (`keydown`/`keyup`) and mouse buttons (`mousedown`/`mouseup`). A default
+XTEST tap is ~12 ms and can begin and end between two of the 60 Hz renderer's
+input polls, so `xdotool key` and `xdotool click` silently do nothing. Position
+with `mousemove --window` to stay client-relative; absolute X/Y carries the
+frame offset on reparented windows. Order assertions so an input that proves
+the mechanism works comes before one that expects input to be *refused* —
+otherwise a broken harness looks like a passing lock.
+
 **Every new feature must remain observable through `--state`.** When adding
 layers, puzzles, or player state, extend that JSON in the same pass — an agent
 that cannot read the result cannot verify its own work. Keep `--check-assets`
 honest about anything newly required at load.
 
-## Current state (v0.3.0)
+## Current state (v0.4.0)
 
 First pass is working: fullscreen, hardware accelerated (verified on the
 RTX 3090 Ti), seven stems in sync, per-track toggles with metering.
