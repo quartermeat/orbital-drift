@@ -1,0 +1,260 @@
+#pragma once
+// One generated background image per track: an illustrated place seen from
+// above, with coast, forest, farmland, roads and towns.
+//
+// This is the backdrop layer only. Zones that override it at close zoom come
+// later; everything here is meant to still read at a distance.
+//
+// Coordinates are image pixels, so what the generator says and what gets drawn
+// are the same numbers. No raylib: generation stays testable without a window.
+#include "mixer.hpp"
+#include "hotreload.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
+namespace orbital {
+
+inline constexpr int SceneWidth = 2560, SceneHeight = 1440;
+inline constexpr int PaletteSize = 6;
+inline constexpr unsigned char BeaconPalette = 0;   // the track's own colour: the beacon alone wears it
+
+struct Rng {
+    uint64_t state;
+    explicit Rng(uint64_t seed) : state(seed * 6364136223846793005ull + 1442695040888963407ull) {}
+    uint32_t next() {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        uint32_t x = uint32_t(state >> 33);
+        x ^= x >> 15; x *= 2246822519u; x ^= x >> 13;
+        return x;
+    }
+    float unit() { return float(next() >> 8) / 16777216.f; }
+    float range(float low, float high) { return low + (high - low) * unit(); }
+    int below(int bound) { return bound > 0 ? int(next() % uint32_t(bound)) : 0; }
+};
+
+inline Rgb shade(Rgb base, float gain, float mix, Rgb toward) {
+    auto blend = [&](unsigned char channel, unsigned char other) {
+        float value = channel * gain * (1 - mix) + other * mix;
+        return static_cast<unsigned char>(std::clamp(value, 0.f, 255.f));
+    };
+    return {blend(base.r, toward.r), blend(base.g, toward.g), blend(base.b, toward.b)};
+}
+
+inline std::array<Rgb, PaletteSize> buildPalette(Rgb base) {
+    return {base,
+            shade(base, .30f, .28f, {12, 18, 28}),
+            shade(base, 1.16f, .48f, {246, 249, 252}),
+            shade(base, .72f, .56f, {78, 106, 130}),
+            shade(base, .84f, .48f, {204, 164, 114}),
+            shade(base, .48f, .60f, {36, 76, 74})};
+}
+
+// ---- terrain ---------------------------------------------------------------
+
+inline float hashNoise(int x, int y, uint64_t seed) {
+    uint64_t h = seed ^ (uint64_t(uint32_t(x)) * 0x9E3779B97F4A7C15ull)
+                      ^ (uint64_t(uint32_t(y)) * 0xC2B2AE3D27D4EB4Full);
+    h ^= h >> 29; h *= 0x165667B19E3779F9ull; h ^= h >> 32;
+    return float(h >> 40) / 16777216.f;
+}
+
+inline float smoothNoise(float x, float y, uint64_t seed) {
+    int ix = int(std::floor(x)), iy = int(std::floor(y));
+    float fx = x - float(ix), fy = y - float(iy);
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    float a = hashNoise(ix, iy, seed), b = hashNoise(ix + 1, iy, seed);
+    float c = hashNoise(ix, iy + 1, seed), d = hashNoise(ix + 1, iy + 1, seed);
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+}
+
+inline float fbm(float x, float y, uint64_t seed, int octaves = 5) {
+    float sum = 0, amplitude = .5f, frequency = 1;
+    for (int i = 0; i < octaves; ++i) {
+        sum += amplitude * smoothNoise(x * frequency, y * frequency, seed + uint64_t(i) * 7919u);
+        frequency *= 2.03f;
+        amplitude *= .5f;
+    }
+    return sum;
+}
+
+// Elevation in 0..1 over image pixels. An island-ish falloff keeps the sea at
+// the edges so a scene reads as a place rather than a crop of noise.
+inline float elevationAt(uint64_t seed, float px, float py) {
+    float x = px / SceneWidth, y = py / SceneHeight;
+    float base = fbm(x * 3.4f, y * 3.4f * SceneHeight / SceneWidth, seed);
+    float dx = (x - .5f) * 2.f, dy = (y - .5f) * 2.f;
+    float falloff = 1.f - std::clamp(std::sqrt(dx * dx * .78f + dy * dy) * .92f, 0.f, 1.f);
+    return std::clamp(base * .72f + falloff * .52f, 0.f, 1.f);
+}
+
+inline float moistureAt(uint64_t seed, float px, float py) {
+    return fbm(px / SceneWidth * 5.1f, py / SceneHeight * 3.1f, seed ^ 0xA5A5A5A5ull, 4);
+}
+
+inline constexpr float SeaLevel = .46f, ShoreLevel = .50f, HighLevel = .74f;
+inline bool isLand(uint64_t seed, float x, float y) { return elevationAt(seed, x, y) > ShoreLevel; }
+
+// ---- features --------------------------------------------------------------
+
+struct Building { float x, y, w, h, spin; unsigned char roof; };
+struct Town { float x, y, radius; std::vector<Building> buildings; };
+struct Blob { float x, y, r; unsigned char tone; };
+struct Patch { std::vector<Blob> blobs; };
+struct Field { float x, y, w, h, spin; unsigned char tone; int furrows; };
+struct Road { std::vector<std::pair<float, float>> points; };
+struct Marker { float x, y, size; unsigned char palette; bool beacon; };
+
+struct Scene {
+    uint64_t seed = 0;
+    std::array<Rgb, PaletteSize> palette{};
+    Rgb sea{}, shallow{}, sand{}, grass{}, highland{}, forest{};
+    std::vector<Town> towns;
+    std::vector<Patch> woods;
+    std::vector<Field> fields;
+    std::vector<Road> roads;
+    std::vector<Marker> markers;
+    int beacon = -1;
+    bool found = false;
+};
+
+inline Scene generateScene(int track, Rgb trackColor) {
+    Scene scene;
+    scene.seed = uint64_t(track) * 7919u + 1013904223u;
+    scene.palette = buildPalette(trackColor);
+    // Terrain stays naturalistic but takes a tint from the track, so the seven
+    // worlds read as different places rather than recolours of one.
+    scene.sea      = shade(trackColor, .34f, .74f, {18, 42, 74});
+    scene.shallow  = shade(trackColor, .52f, .66f, {46, 96, 126});
+    scene.sand     = shade(trackColor, .92f, .52f, {216, 198, 152});
+    scene.grass    = shade(trackColor, .64f, .60f, {96, 132, 84});
+    scene.highland = shade(trackColor, .70f, .58f, {138, 132, 118});
+    scene.forest   = shade(trackColor, .44f, .66f, {48, 84, 60});
+    Rng rng(scene.seed ^ 0x51ED270Bull);
+
+    // Towns first: everything else is placed relative to them.
+    for (int attempt = 0; attempt < 900 && int(scene.towns.size()) < 9; ++attempt) {
+        float x = rng.range(SceneWidth * .10f, SceneWidth * .90f);
+        float y = rng.range(SceneHeight * .12f, SceneHeight * .88f);
+        if (elevationAt(scene.seed, x, y) < ShoreLevel + .03f) continue;
+        bool crowded = false;
+        for (const Town& other : scene.towns)
+            crowded |= (other.x - x) * (other.x - x) + (other.y - y) * (other.y - y) < 330.f * 330.f;
+        if (crowded) continue;
+        Town town{x, y, rng.range(70.f, 165.f), {}};
+        int count = 16 + rng.below(30);
+        for (int i = 0; i < count; ++i) {
+            float angle = rng.range(0, 6.2831853f), reach = town.radius * std::sqrt(rng.unit());
+            Building building{};
+            building.x = x + std::cos(angle) * reach;
+            building.y = y + std::sin(angle) * reach;
+            building.w = rng.range(13.f, 34.f);
+            building.h = rng.range(13.f, 30.f);
+            building.spin = rng.range(-.35f, .35f);
+            building.roof = static_cast<unsigned char>(1 + rng.below(PaletteSize - 1));
+            if (elevationAt(scene.seed, building.x, building.y) > ShoreLevel)
+                town.buildings.push_back(building);
+        }
+        if (town.buildings.size() > 8) scene.towns.push_back(town);
+    }
+
+    // Roads: a greedy nearest-neighbour chain, so every town is reachable.
+    if (scene.towns.size() > 1) {
+        std::vector<int> left;
+        for (int i = 1; i < int(scene.towns.size()); ++i) left.push_back(i);
+        int at = 0;
+        while (!left.empty()) {
+            auto nearest = std::min_element(left.begin(), left.end(), [&](int a, int b) {
+                auto span = [&](int i) {
+                    float dx = scene.towns[size_t(i)].x - scene.towns[size_t(at)].x;
+                    float dy = scene.towns[size_t(i)].y - scene.towns[size_t(at)].y;
+                    return dx * dx + dy * dy;
+                };
+                return span(a) < span(b);
+            });
+            int to = *nearest;
+            left.erase(nearest);
+            Road road;
+            float x0 = scene.towns[size_t(at)].x, y0 = scene.towns[size_t(at)].y;
+            float x1 = scene.towns[size_t(to)].x, y1 = scene.towns[size_t(to)].y;
+            int steps = 7;
+            for (int i = 0; i <= steps; ++i) {
+                float t = float(i) / float(steps);
+                float wobble = (i == 0 || i == steps) ? 0.f : rng.range(-58.f, 58.f);
+                road.points.emplace_back(x0 + (x1 - x0) * t - (y1 - y0) * wobble / 900.f,
+                                         y0 + (y1 - y0) * t + (x1 - x0) * wobble / 900.f);
+            }
+            scene.roads.push_back(std::move(road));
+            at = to;
+        }
+    }
+
+    // Woods where it is damp and not too high.
+    for (int attempt = 0; attempt < 2600 && int(scene.woods.size()) < 90; ++attempt) {
+        float x = rng.range(0, float(SceneWidth)), y = rng.range(0, float(SceneHeight));
+        float height = elevationAt(scene.seed, x, y);
+        if (height < ShoreLevel + .02f || height > HighLevel) continue;
+        if (moistureAt(scene.seed, x, y) < .48f) continue;
+        bool nearTown = false;
+        for (const Town& town : scene.towns)
+            nearTown |= (town.x - x) * (town.x - x) + (town.y - y) * (town.y - y) < town.radius * town.radius * 1.7f;
+        if (nearTown) continue;
+        Patch patch;
+        int trees = 12 + rng.below(26);
+        float spread = rng.range(40.f, 120.f);
+        for (int i = 0; i < trees; ++i) {
+            float angle = rng.range(0, 6.2831853f), reach = spread * std::sqrt(rng.unit());
+            float bx = x + std::cos(angle) * reach, by = y + std::sin(angle) * reach;
+            if (elevationAt(scene.seed, bx, by) < ShoreLevel) continue;
+            patch.blobs.push_back({bx, by, rng.range(7.f, 17.f), static_cast<unsigned char>(rng.below(3))});
+        }
+        if (patch.blobs.size() > 6) scene.woods.push_back(std::move(patch));
+    }
+
+    // Farmland ringing the towns.
+    for (const Town& town : scene.towns) {
+        int count = 4 + rng.below(7);
+        for (int i = 0; i < count; ++i) {
+            float angle = rng.range(0, 6.2831853f), reach = town.radius * rng.range(1.3f, 2.7f);
+            Field field{};
+            field.x = town.x + std::cos(angle) * reach;
+            field.y = town.y + std::sin(angle) * reach;
+            field.w = rng.range(70.f, 190.f);
+            field.h = rng.range(50.f, 130.f);
+            field.spin = rng.range(-.5f, .5f);
+            field.tone = static_cast<unsigned char>(3 + rng.below(3));
+            field.furrows = 4 + rng.below(7);
+            if (elevationAt(scene.seed, field.x, field.y) > ShoreLevel + .015f
+                && elevationAt(scene.seed, field.x, field.y) < HighLevel)
+                scene.fields.push_back(field);
+        }
+    }
+
+    // Markers: small spires on land. Exactly one wears the track's own colour,
+    // and that one is the beacon.
+    for (int attempt = 0; attempt < 2000 && int(scene.markers.size()) < 30; ++attempt) {
+        float x = rng.range(SceneWidth * .05f, SceneWidth * .95f);
+        float y = rng.range(SceneHeight * .06f, SceneHeight * .94f);
+        if (elevationAt(scene.seed, x, y) < ShoreLevel + .02f) continue;
+        bool crowded = false;
+        for (const Marker& other : scene.markers)
+            crowded |= (other.x - x) * (other.x - x) + (other.y - y) * (other.y - y) < 150.f * 150.f;
+        if (crowded) continue;
+        scene.markers.push_back({x, y, rng.range(15.f, 23.f),
+                                 static_cast<unsigned char>(1 + rng.below(PaletteSize - 1)), false});
+    }
+    if (!scene.markers.empty()) {
+        scene.beacon = rng.below(int(scene.markers.size()));
+        scene.markers[size_t(scene.beacon)].palette = BeaconPalette;
+        scene.markers[size_t(scene.beacon)].beacon = true;
+    }
+    return scene;
+}
+
+inline int countBeaconMatches(const Scene& scene) {
+    int total = 0;
+    for (const Marker& marker : scene.markers) total += marker.palette == BeaconPalette ? 1 : 0;
+    return total;
+}
+}

@@ -26,7 +26,7 @@ make run      # fullscreen
 python3 scripts/check_controls.py     # drives real input against a live window
 python3 scripts/check_hot_reload.py   # edits assets under a live session
 python3 scripts/check_progression.py  # sigil opens the world without unsealing
-python3 scripts/check_canvas.py       # descends, zooms in, finds the beacon, screenshots it
+python3 scripts/preview_worlds.py     # saves a PNG of all seven world backgrounds
 ```
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
@@ -103,50 +103,33 @@ innermost orbit.
 
 ## Worlds
 
-Every track owns a world: a 2D artwork you pan and zoom into without end.
-Waking a track lets you click its orbit node (or press `Z`) to descend. Drag to
-pan, wheel or `W`/`S` to zoom toward the cursor. Somewhere in there is the
-beacon; right-click it to unseal the next track.
+Every track owns a world: one generated background image, panned and zoomed.
+`scene.hpp` lays out an island — coast, beach, woodland, farmland, roads and
+towns — and `bakeScene` draws it once into a 2560x1440 render texture. After
+that the view is only ever panning and zooming an image, with zoom bounded
+between fitting the frame and 9x.
 
-**Nothing is stored.** The canvas is a recursive grid — the root square is
-[0,1]x[0,1], every node holds a handful of motifs plus `Branch`^2 children, and
-a node's contents come from hashing its path. Zooming makes deeper nodes large
-enough to draw, so detail keeps arriving for as long as you keep going, at no
-memory cost. This is why it can be endless.
+Markers are small spires scattered on land. Exactly one wears the track's own
+colour, and that one is the beacon: right-click it to unseal the next track.
 
-**The hunt is a conjunction search, and that is the whole design.** The beacon
-is the only motif that is both a **spire** *and* wearing the **track's own
-colour**. Generation *refuses that pairing everywhere else*, which is what makes
-the beacon globally unique without anything being stored or searched. Plenty of
-spires wear other colours and plenty of other shapes wear the track colour, so
-neither feature alone narrows it down. Remove either guarantee and the search
-becomes a pop-out, and the game becomes nothing.
+Zones that override the background at close zoom are the next layer and do not
+exist yet. The background is meant to still read at a distance.
 
 Rules:
 
-- **The sigil is a doorway, not a shortcut.** Clicking the sigil in the system
-  view descends into that world; it must never unseal a track on its own. The
-  unseal is only ever earned by finding the beacon.
-- **Composition, not noise.** Each node lays out one backdrop form, two mid
-  forms, then detail, and sorts largest-first so detail lands on top. Each
-  depth also leans on two palette entries. Without both, every zoom level looks
-  identical and the canvas reads as camouflage rather than artwork — that was
-  the first version and it was not worth keeping.
-- **Generation is deterministic and raylib-free.** `canvas.hpp` uses its own
-  small PRNG because `std::uniform_*_distribution` is not specified to give the
-  same sequence across implementations, and a world must be identical every run
-  and on every machine. Keeping raylib out is what lets it be unit-tested with
-  no window.
-- **The view transform is `double`.** Deep zoom runs out of `float` precision
-  within a few levels.
-- **Cull before drawing.** Nodes off screen or under ~11 px are skipped, and
-  motifs under ~1.15 px are skipped. Motifs fade in as they become legible and
-  out as you pass through them, so zooming never pops.
-- **Difficulty is data.** `beacon.depth` in `layers.conf` sets how far in the
-  beacon hides — each level is 3x further — and hot-reloads.
-- **Read the mixer live, not the frame's `mask` snapshot,** when deciding
-  whether a track can be descended into. A track woken earlier in the same
-  frame is already on; using the stale snapshot made `7` then `Z` fail.
+- **Worlds bake lazily and are cached.** Generating and drawing a scene is not
+  free; do it on first visit, not at startup.
+- **Nothing sits in the sea.** Towns, buildings, trees and markers are all
+  rejected below `ShoreLevel`, which is what makes a scene read as a place.
+- **Generation is deterministic and raylib-free.** `scene.hpp` uses its own
+  PRNG, so a world is identical every run and on every machine, and the layout
+  is unit-testable without a window.
+- `--gallery` opens straight into a world with 1-7 switching between them, and
+  `--world N` opens one directly. `scripts/preview_worlds.py` saves a PNG of
+  each.
+- **Capture with the app's own `--capture`.** ImageMagick `import -window`
+  silently returns the same stale frame under a compositor; seven "different"
+  worlds came back byte-identical that way.
 
 ## Hot reload
 
@@ -216,7 +199,7 @@ layers, puzzles, or player state, extend that JSON in the same pass — an agent
 that cannot read the result cannot verify its own work. Keep `--check-assets`
 honest about anything newly required at load.
 
-## Current state (v0.6.0)
+## Current state (v0.7.0)
 
 First pass is working: fullscreen, hardware accelerated (verified on the
 RTX 3090 Ti), seven stems in sync, per-track toggles with metering.
@@ -257,10 +240,16 @@ revisit when arbitrary projects load.
 
 - C++20, raylib 5.5 static, built with `-Wall -Wextra -Wpedantic`. Keep it warning-clean.
 - Match the existing dense style in `src/`; don't reformat wholesale.
+- **Prefer getting the thing working over building the pipes around it.** The
+  user has asked for less "future interface piping": fewer flags, state fields,
+  harness scripts and invariants written in advance of a need, and more of the
+  actual result on screen. Add observability and tests where they earn their
+  keep now, not where they might later. When in doubt, ship the visible change
+  and let the scaffolding follow the second time it is needed.
 - Cover mixer behaviour in `tests/mixer_test.cpp`, config parsing in
   `tests/config_test.cpp`, unlock rules in `tests/progress_test.cpp`, and world
-  generation in `tests/canvas_test.cpp`; all four run without an audio device
-  or a display.
+  layout in `tests/scene_test.cpp`; all four run without an audio device or a
+  display.
 - The vendored raylib headers are included with `-isystem` so their warnings
   stay out of our build. Keep our own code warning-clean under
   `-Wall -Wextra -Wpedantic`.
