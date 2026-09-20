@@ -96,6 +96,9 @@ def main():
             # Where the app actually drew it, not a second copy of the layout maths.
             sigil_x = sigil_y = 0
 
+            subprocess.run(['xdotool', 'windowactivate', '--sync', window,
+                            'windowfocus', '--sync', window], check=True)
+            time.sleep(.6)   # settle the focus before the first input
             # Wake the open track FIRST. This proves key injection works, so the
             # sealed-track check below cannot pass just because nothing arrived.
             key('7')

@@ -12,8 +12,12 @@ def main():
     artifacts.mkdir(exist_ok=True)
     state_path = artifacts / 'controls.json'
     state_path.unlink(missing_ok=True)
+    # This checks input plumbing, not progression, so start from a fully
+    # unsealed save and resume it: otherwise six of the seven tracks are
+    # sealed and correctly refuse to toggle.
+    (artifacts / 'progress.json').write_text('{"unlocked":7}\n')
     with (artifacts / 'controls.log').open('w') as log:
-        app = subprocess.Popen([str(ROOT/'build/orbital-drift'),'--windowed',
+        app = subprocess.Popen([str(ROOT/'build/orbital-drift'),'--windowed','--resume',
                                 '--state',str(state_path),'--seconds','40'],stdout=log,stderr=subprocess.STDOUT)
         def state():
             try:
@@ -41,6 +45,10 @@ def main():
                 # begin and end between the 60 Hz renderer's input polls.
                 time.sleep(.08)
                 subprocess.run(['xdotool','keyup',name],check=True)
+            # A run begins in silence now, so wake everything before testing
+            # that each key mutes and unmutes its track.
+            key('a')
+            wait_for(lambda s:s.get('tracks') and all(t['enabled'] for t in s['tracks']),'ALL ON did not wake every track')
             for track in range(7):
                 key(str(track+1))
                 wait_for(lambda s:not s.get('tracks',[{}]*7)[track].get('enabled',True),f'track {track+1} did not mute')

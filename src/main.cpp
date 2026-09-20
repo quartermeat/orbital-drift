@@ -1,7 +1,7 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
 #include "progress.hpp"
-#include "planet.hpp"
+#include "canvas.hpp"
 #include "raylib.h"
 #include "raymath.h"   // must follow raylib.h: it uses raylib's vector types
 #include "rlgl.h"
@@ -31,8 +31,8 @@ enum class View { System, Planet };
 static View view=View::System;
 static int planetTrack=-1;
 static bool beaconOnScreen=false,beaconFound=false;
-static float beaconX=0,beaconY=0,camDistance=0;
-static constexpr float PlanetRadius=2.f;
+static float beaconX=0,beaconY=0;
+static double zoomLevel=1,viewCenterX=0,viewCenterY=0,beaconWorldX=0,beaconWorldY=0;
 static void applyLayers() {
     for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
 }
@@ -84,7 +84,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.5.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.6.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -102,7 +102,9 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
        <<"},\"planet\":{\"view\":"<<quote(view==View::Planet?"planet":"system")
        <<",\"track\":"<<(planetTrack>=0?quote(Names[planetTrack]):std::string("null"))
        <<",\"beacon_on_screen\":"<<(beaconOnScreen?"true":"false")<<",\"beacon_found\":"<<(beaconFound?"true":"false")
-       <<",\"beacon_x\":"<<int(beaconX)<<",\"beacon_y\":"<<int(beaconY)<<",\"camera_distance\":"<<camDistance<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
+       <<",\"beacon_x\":"<<int(beaconX)<<",\"beacon_y\":"<<int(beaconY)<<",\"zoom\":"<<zoomLevel
+       <<",\"view_x\":"<<viewCenterX<<",\"view_y\":"<<viewCenterY
+       <<",\"beacon_world_x\":"<<beaconWorldX<<",\"beacon_world_y\":"<<beaconWorldY<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
        <<",\"tracks\":[";
     uint32_t mask=mixer.enabled;
     for(int i=0;i<TrackCount;++i) {
@@ -133,7 +135,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.5.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.6.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -185,29 +187,8 @@ int main(int argc,char** argv) {
         Shader shader=LoadShader(nullptr,(options.assets/"space.fs").c_str());
         if(!IsShaderValid(shader)||shader.id==rlGetShaderIdDefault())throw std::runtime_error("Space shader failed to compile");
         int resLoc=GetShaderLocation(shader,"resolution"),timeLoc=GetShaderLocation(shader,"time"),energyLoc=GetShaderLocation(shader,"energy");
-        Shader lit=LoadShader((options.assets/"planet.vs").c_str(),(options.assets/"planet.fs").c_str());
-        if(!IsShaderValid(lit)||lit.id==rlGetShaderIdDefault())throw std::runtime_error("Planet shader failed to compile");
-        lit.locs[SHADER_LOC_MATRIX_MODEL]=GetShaderLocation(lit,"matModel");
-        lit.locs[SHADER_LOC_MATRIX_NORMAL]=GetShaderLocation(lit,"matNormal");
-        int lightLoc=GetShaderLocation(lit,"lightDir"),viewLoc=GetShaderLocation(lit,"viewPos"),ambientLoc=GetShaderLocation(lit,"ambient");
-        int terrainLoc=GetShaderLocation(lit,"terrain"),seaLoc=GetShaderLocation(lit,"seaColor"),landLoc=GetShaderLocation(lit,"landColor");
-        // Six clearly different silhouettes: the search has to be a conjunction
-        // of shape and colour, so the shapes must be unmistakable apart.
-        std::array<Mesh,PropKindCount> propMesh{};
-        propMesh[int(PropKind::Tower)]=GenMeshCylinder(.018f,.115f,9);
-        propMesh[int(PropKind::Dome)]=GenMeshHemiSphere(.040f,7,11);
-        propMesh[int(PropKind::Spire)]=GenMeshCone(.024f,.150f,8);
-        propMesh[int(PropKind::Grove)]=GenMeshSphere(.034f,6,8);
-        propMesh[int(PropKind::Arch)]=GenMeshTorus(.012f,.040f,6,10);
-        propMesh[int(PropKind::Crystal)]=GenMeshCube(.048f,.048f,.048f);
-        // Cylinders, cones and hemispheres are generated sitting on y=0; spheres,
-        // cubes and tori are centred, so they need lifting or they sink halfway in.
-        std::array<float,PropKindCount> propLift{0.f,0.f,0.f,.034f,.012f,.024f};
-        Mesh globeMesh=GenMeshSphere(PlanetRadius,40,56);
-        Material propMat=LoadMaterialDefault();propMat.shader=lit;
-        std::array<Planet,TrackCount> planets{};
-        for(int i=0;i<TrackCount;++i)planets[i]=generatePlanet(i,layers.colors[i],2400);
-        Watched planetShaderWatch{options.assets/"planet.fs"};planetShaderWatch.prime();
+        std::array<Canvas,TrackCount> canvases{};
+        for(int i=0;i<TrackCount;++i)canvases[i]=makeCanvas(i,layers.colors[i],layers.beaconDepth);
         Watched shaderWatch{options.assets/"space.fs"},configWatch{options.assets/"layers.conf"};
         shaderWatch.prime();configWatch.prime();
         std::cout<<"[reload] watching space.fs and layers.conf; saves apply live"<<std::endl;
@@ -235,8 +216,10 @@ int main(int argc,char** argv) {
         makeStars();
         std::array<float,TrackCount> visibility{},meter{};
         double unlockedAt=-9;std::string unlockedName;
-        Camera3D camera{};camera.up={0,1,0};camera.fovy=46;camera.projection=CAMERA_PERSPECTIVE;camera.target={0,0,0};
-        float camYaw=.6f,camPitch=.35f,camDist=PlanetRadius*5.4f,camDistWant=PlanetRadius*2.6f;
+        // The view into a world: where we are looking, and how many pixels one
+        // canvas unit covers. Doubles, because deep zoom runs out of float fast.
+        double viewX=.5,viewY=.5,viewScale=1;
+        std::vector<NodeId> nodeStack;std::vector<Element> elementBuffer;
         double enteredAt=-9;
         float sigilPulse=0;
         double started=GetTime(),lastState=-1,toastAt=-9;
@@ -256,67 +239,60 @@ int main(int argc,char** argv) {
                     } else {toast=note;reloadError=note;}
                     toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
                 }
-                if(planetShaderWatch.changed()) {
-                    Shader next=LoadShader((options.assets/"planet.vs").c_str(),(options.assets/"planet.fs").c_str());
-                    if(IsShaderValid(next)&&next.id!=rlGetShaderIdDefault()) {
-                        UnloadShader(lit);lit=next;
-                        lit.locs[SHADER_LOC_MATRIX_MODEL]=GetShaderLocation(lit,"matModel");
-                        lit.locs[SHADER_LOC_MATRIX_NORMAL]=GetShaderLocation(lit,"matNormal");
-                        lightLoc=GetShaderLocation(lit,"lightDir");viewLoc=GetShaderLocation(lit,"viewPos");
-                        ambientLoc=GetShaderLocation(lit,"ambient");terrainLoc=GetShaderLocation(lit,"terrain");
-                        seaLoc=GetShaderLocation(lit,"seaColor");landLoc=GetShaderLocation(lit,"landColor");propMat.shader=lit;
-                        ++shaderReloads;toast="planet.fs reloaded";reloadError.clear();
-                    } else {UnloadShader(next);toast="planet.fs did not compile - keeping the previous shader";reloadError=toast;}
-                    toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
-                }
                 if(configWatch.changed()) {
                     int previousStars=layers.starCount;
                     layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
                     if(layers.starCount!=previousStars)makeStars();
-                    for(int i=0;i<TrackCount;++i)planets[i]=generatePlanet(i,layers.colors[i],2400);
+                    for(int i=0;i<TrackCount;++i)canvases[i]=makeCanvas(i,layers.colors[i],layers.beaconDepth);
                     ++configReloads;reloadError=layers.note;
                     toast=layers.note.empty()?"layers.conf reloaded":"layers.conf: "+layers.note;
                     toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
                 }
             }
             float w=float(GetScreenWidth()),h=float(GetScreenHeight()),u=std::min(w/1600.f,h/900.f);
-            // ---------- planet view: a globe you orbit, with one thing hidden on it ----------
+            // ---------- world view: a 2D artwork you pan and zoom without end ----------
             if(view==View::Planet) {
-                Planet& planet=planets[size_t(planetTrack)];
-                float step=std::min(GetFrameTime(),.1f),now=float(elapsed);
+                Canvas& canvas=canvases[size_t(planetTrack)];
+                float step=std::min(GetFrameTime(),.1f);
                 if(IsKeyPressed(KEY_ESCAPE)||IsKeyPressed(KEY_BACKSPACE)) {
                     view=View::System;planetTrack=-1;beaconOnScreen=false;
-                    std::cout<<"[planet] left"<<std::endl;continue;
+                    std::cout<<"[world] left"<<std::endl;continue;
                 }
+                Vector2 pointer=GetMousePosition();
+                double halfW=w*.5,halfH=h*.5,fit=std::min(w,h)*.92;
+                auto screenX=[&](double wx){return (wx-viewX)*viewScale+halfW;};
+                auto screenY=[&](double wy){return (wy-viewY)*viewScale+halfH;};
                 if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
                     Vector2 drag=GetMouseDelta();
-                    camYaw-=drag.x*.0062f;camPitch=std::clamp(camPitch+drag.y*.0062f,-1.45f,1.45f);
+                    viewX-=drag.x/viewScale;viewY-=drag.y/viewScale;
                 }
-                if(IsKeyDown(KEY_LEFT))camYaw+=step*1.1f;
-                if(IsKeyDown(KEY_RIGHT))camYaw-=step*1.1f;
-                if(IsKeyDown(KEY_UP))camPitch=std::clamp(camPitch+step*.9f,-1.45f,1.45f);
-                if(IsKeyDown(KEY_DOWN))camPitch=std::clamp(camPitch-step*.9f,-1.45f,1.45f);
-                auto zoom=[&](float factor){camDistWant=std::clamp(camDistWant*factor,PlanetRadius*1.2f,PlanetRadius*4.4f);};
-                if(float wheel=GetMouseWheelMove();wheel!=0)zoom(1-wheel*.12f);
-                if(IsKeyDown(KEY_W))zoom(1-step*.85f);
-                if(IsKeyDown(KEY_S))zoom(1+step*.85f);
-                camDist+=(camDistWant-camDist)*(1-std::exp(-step*4.2f));
-                camDistance=camDist;
-                camera.position={std::cos(camPitch)*std::cos(camYaw)*camDist,std::sin(camPitch)*camDist,
-                                 std::cos(camPitch)*std::sin(camYaw)*camDist};
-                Vector3 camUnit=Vector3Normalize(camera.position);
+                double pan=step*640.0/viewScale;
+                if(IsKeyDown(KEY_LEFT))viewX-=pan;
+                if(IsKeyDown(KEY_RIGHT))viewX+=pan;
+                if(IsKeyDown(KEY_UP))viewY-=pan;
+                if(IsKeyDown(KEY_DOWN))viewY+=pan;
+                // Zooming toward the cursor is what makes a deep-zoom artwork
+                // feel like you are travelling into it rather than scaling it.
+                auto zoomAt=[&](double factor,double sx,double sy){
+                    double wx=(sx-halfW)/viewScale+viewX,wy=(sy-halfH)/viewScale+viewY;
+                    viewScale=std::clamp(viewScale*factor,fit*.55,fit*2.4e9);
+                    viewX=wx-(sx-halfW)/viewScale;viewY=wy-(sy-halfH)/viewScale;
+                };
+                if(float wheel=GetMouseWheelMove();wheel!=0)zoomAt(std::pow(1.22,wheel),pointer.x,pointer.y);
+                if(IsKeyDown(KEY_W))zoomAt(std::pow(2.4,step),pointer.x,pointer.y);
+                if(IsKeyDown(KEY_S))zoomAt(std::pow(2.4,-step),pointer.x,pointer.y);
+                zoomLevel=viewScale/fit;viewCenterX=viewX;viewCenterY=viewY;
+                beaconWorldX=canvas.beacon.x;beaconWorldY=canvas.beacon.y;
 
-                const Prop& target=planet.props[size_t(planet.beacon)];
-                Vector3 beaconDir=Vector3Normalize({target.normal.x,target.normal.y,target.normal.z});
-                Vector2 beaconScreen=GetWorldToScreen(Vector3Scale(beaconDir,PlanetRadius+.16f*target.scale),camera);
-                beaconOnScreen=Vector3DotProduct(beaconDir,camUnit)>.12f
-                    &&beaconScreen.x>0&&beaconScreen.y>0&&beaconScreen.x<w&&beaconScreen.y<h;
-                beaconX=beaconScreen.x;beaconY=beaconScreen.y;beaconFound=planet.found;
-                Vector2 pointer=GetMousePosition();
-                bool overBeacon=beaconOnScreen&&Vector2Distance(pointer,beaconScreen)<24*u;
-                if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)&&!planet.found) {
+                double beaconScreenX=screenX(canvas.beacon.x),beaconScreenY=screenY(canvas.beacon.y);
+                double beaconPixels=canvas.beacon.size*viewScale;
+                beaconOnScreen=beaconPixels>3.5&&beaconScreenX>0&&beaconScreenY>0&&beaconScreenX<w&&beaconScreenY<h;
+                beaconX=float(beaconScreenX);beaconY=float(beaconScreenY);beaconFound=canvas.found;
+                bool overBeacon=beaconOnScreen
+                    &&Vector2Distance(pointer,{float(beaconScreenX),float(beaconScreenY)})<float(std::max(15.0,beaconPixels));
+                if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)&&!canvas.found) {
                     if(overBeacon) {
-                        planet.found=beaconFound=true;
+                        canvas.found=beaconFound=true;
                         toast="Found it";toastAt=elapsed;reloadError.clear();
                         if(!progress.complete()&&planetTrack==progress.frontier()) {
                             unlockedName=Names[progress.nextLocked()];
@@ -328,71 +304,98 @@ int main(int argc,char** argv) {
                 }
                 SetMouseCursor(overBeacon?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
 
-                float lightDir[3]={-.42f,-.58f,-.70f},ambient[3]={.21f,.24f,.31f};
-                float eye[3]={camera.position.x,camera.position.y,camera.position.z};
-                SetShaderValue(lit,lightLoc,lightDir,SHADER_UNIFORM_VEC3);
-                SetShaderValue(lit,viewLoc,eye,SHADER_UNIFORM_VEC3);
-                SetShaderValue(lit,ambientLoc,ambient,SHADER_UNIFORM_VEC3);
-
-                BeginDrawing();ClearBackground({3,6,13,255});
-                for(auto star:stars)
-                    DrawCircleV({star.x*w,star.y*h},star.r*u*.75f,
-                                Fade({178,204,226,255},.13f+.15f*std::sin(now*.3f+star.phase)));
-                auto rgb3=[](Rgb c){return std::array<float,3>{c.r/255.f,c.g/255.f,c.b/255.f};};
-                auto sea=rgb3(planet.sea),land=rgb3(planet.land);
-                float on=1.f,off=0.f;
-                SetShaderValue(lit,seaLoc,sea.data(),SHADER_UNIFORM_VEC3);
-                SetShaderValue(lit,landLoc,land.data(),SHADER_UNIFORM_VEC3);
-                BeginMode3D(camera);
-                SetShaderValue(lit,terrainLoc,&on,SHADER_UNIFORM_FLOAT);
-                propMat.maps[MATERIAL_MAP_DIFFUSE].color=WHITE;
-                DrawMesh(globeMesh,propMat,MatrixIdentity());
-                SetShaderValue(lit,terrainLoc,&off,SHADER_UNIFORM_FLOAT);
-                for(const Prop& prop:planet.props) {
-                    Vector3 up{prop.normal.x,prop.normal.y,prop.normal.z};
-                    if(Vector3DotProduct(up,camUnit)<.035f)continue;   // the far side is never drawn
-                    Rgb tint=planet.palette[prop.palette];
-                    propMat.maps[MATERIAL_MAP_DIFFUSE].color=Color{tint.r,tint.g,tint.b,255};
-                    float size=prop.scale,stand=PlanetRadius+propLift[int(prop.kind)]*prop.scale;
-                    DrawMesh(propMesh[int(prop.kind)],propMat,
-                        MatrixMultiply(MatrixMultiply(MatrixMultiply(
-                            MatrixScale(size,size,size),MatrixRotateY(prop.spin)),
-                            QuaternionToMatrix(QuaternionFromVector3ToVector3({0,1,0},up))),
-                            MatrixTranslate(up.x*stand,up.y*stand,up.z*stand)));
+                Color deepColor{canvas.deep.r,canvas.deep.g,canvas.deep.b,255};
+                BeginDrawing();ClearBackground(deepColor);
+                DrawRectangleRec({float(screenX(0)),float(screenY(0)),float(viewScale),float(viewScale)},
+                                 Color{canvas.ground.r,canvas.ground.g,canvas.ground.b,255});
+                // Walk the tree, drawing only what is both on screen and big
+                // enough to see. Deeper nodes arrive as you zoom, so detail
+                // never runs out and nothing is ever stored.
+                nodeStack.clear();nodeStack.push_back({0,0,0});
+                int drawn=0,deepest=0;
+                while(!nodeStack.empty()) {
+                    NodeId id=nodeStack.back();nodeStack.pop_back();
+                    double span=nodeSpan(id.depth),nodePixels=span*viewScale;
+                    double nx=screenX(double(id.ix)*span),ny=screenY(double(id.iy)*span);
+                    if(nx+nodePixels<-48||ny+nodePixels<-48||nx>w+48||ny>h+48)continue;
+                    if(nodePixels<11)continue;
+                    deepest=std::max(deepest,id.depth);
+                    nodeElements(canvas.world,id,canvas.isBeaconNode(id)?canvas.beaconSlot:-1,elementBuffer);
+                    for(const Element& element:elementBuffer) {
+                        double pixels=element.size*viewScale;
+                        if(pixels<1.15)continue;
+                        double ex=screenX(element.x),ey=screenY(element.y);
+                        if(ex<-pixels||ey<-pixels||ex>w+pixels||ey>h+pixels)continue;
+                        // Fade in as detail becomes legible, and back out as you
+                        // pass through it, so zooming never pops.
+                        float alpha=float(std::min(1.0,(pixels-1.15)/6.0));
+                        if(pixels>1500)alpha*=float(std::max(0.0,1.0-(pixels-1500)/2600.0));
+                        if(alpha<=.012f)continue;
+                        Rgb rgb=canvas.palette[element.palette];
+                        Color tint=Fade(Color{rgb.r,rgb.g,rgb.b,255},alpha);
+                        Vector2 at{float(ex),float(ey)};
+                        float radius=float(pixels),degrees=element.spin*RAD2DEG;
+                        switch(element.motif) {
+                            case Motif::Ring:    DrawRing(at,radius*.56f,radius,0,360,26,tint);break;
+                            case Motif::Spire:   DrawPoly(at,3,radius,degrees-90,tint);break;
+                            case Motif::Bar:     DrawRectanglePro({at.x,at.y,radius*1.9f,radius*.46f},
+                                                                  {radius*.95f,radius*.23f},degrees,tint);break;
+                            case Motif::Blossom: DrawPoly(at,6,radius,degrees,tint);break;
+                            case Motif::Lattice: DrawPolyLinesEx(at,4,radius,degrees,std::max(1.f,radius*.15f),tint);break;
+                            case Motif::Eye:     DrawCircleV(at,radius,tint);
+                                                 DrawCircleV(at,radius*.42f,Fade(deepColor,alpha));break;
+                        }
+                        ++drawn;
+                    }
+                    if(nodePixels>76&&id.depth<MaxDepth)
+                        for(int j=0;j<Branch;++j)for(int i=0;i<Branch;++i)
+                            nodeStack.push_back({id.depth+1,id.ix*Branch+i,id.iy*Branch+j});
                 }
-                EndMode3D();
 
                 float pad=38*u;
-                Rgb wanted=planet.palette[BeaconPalette];
-                Color want{wanted.r,wanted.g,wanted.b,255};
-                text(font,"PLANET",pad,pad-10*u,12*u,{118,150,172,255});
-                text(font,Names[planetTrack],pad,pad+8*u,34*u,{231,238,244,255});
-                text(font,planet.found?"This world has given up its secret":"Somewhere down there, one spire wears this colour",
-                     pad,pad+50*u,13*u,{136,162,182,255});
-                // The target card: a conjunction search is only fair if you can
-                // see both halves of what you are hunting for.
-                float cardW=196*u,cardH=112*u,cardX=w-pad-cardW,cardY2=pad-14*u;
-                DrawRectangleRounded({cardX,cardY2,cardW,cardH},.1f,8,{10,17,27,232});
-                DrawRectangleRoundedLinesEx({cardX,cardY2,cardW,cardH},.1f,8,u,Fade(want,.45f));
-                text(font,"FIND",cardX+14*u,cardY2+11*u,11*u,{132,160,180,255});
-                DrawPoly({cardX+cardW*.5f,cardY2+62*u},3,25*u,-90,want);
-                DrawPolyLinesEx({cardX+cardW*.5f,cardY2+62*u},3,25*u,-90,u*1.4f,Fade({255,255,255,255},.35f));
-                centered(font,"A SPIRE, THIS COLOUR",cardX+cardW*.5f,cardY2+88*u,10*u,Fade(want,.85f));
-                if(planet.found) {
-                    float ring=(26+5*std::sin(now*3))*u;
-                    DrawCircleLinesV(beaconScreen,ring,Fade({208,244,228,255},.9f));
-                    DrawCircleLinesV(beaconScreen,ring*1.35f,Fade({208,244,228,255},.35f));
-                    centered(font,"FOUND",beaconScreen.x,beaconScreen.y+ring+7*u,11*u,{208,244,228,255});
+                Rgb wantedRgb=canvas.palette[BeaconPalette];
+                Color want{wantedRgb.r,wantedRgb.g,wantedRgb.b,255};
+                if(canvas.found) {
+                    float ring=float(std::max(20.0,beaconPixels*1.5))+4*std::sin(float(elapsed)*3);
+                    DrawCircleLinesV({float(beaconScreenX),float(beaconScreenY)},ring,Fade({208,244,228,255},.9f));
+                    centered(font,"FOUND",float(beaconScreenX),float(beaconScreenY)+ring+7*u,11*u,{208,244,228,255});
                 } else if(overBeacon) {
-                    DrawCircleLinesV(beaconScreen,24*u,Fade(want,.55f));
+                    DrawCircleLinesV({float(beaconScreenX),float(beaconScreenY)},
+                                     float(std::max(16.0,beaconPixels*1.4)),Fade(want,.55f));
                 }
+                DrawRectangleRounded({pad-16*u,pad-24*u,430*u,98*u},.08f,8,Fade(deepColor,.72f));
+                text(font,"WORLD",pad,pad-10*u,12*u,{118,150,172,255});
+                text(font,Names[planetTrack],pad,pad+8*u,34*u,{231,238,244,255});
+                text(font,canvas.found?"This world has given up its secret":"Keep going in. One spire wears this colour.",
+                     pad,pad+50*u,13*u,{136,162,182,255});
+                float cardW=196*u,cardH=112*u,cardX=w-pad-cardW,cardTop=pad-14*u;
+                DrawRectangleRounded({cardX,cardTop,cardW,cardH},.1f,8,{10,17,27,232});
+                DrawRectangleRoundedLinesEx({cardX,cardTop,cardW,cardH},.1f,8,u,Fade(want,.45f));
+                text(font,"FIND",cardX+14*u,cardTop+11*u,11*u,{132,160,180,255});
+                DrawPoly({cardX+cardW*.5f,cardTop+62*u},3,25*u,-90,want);
+                centered(font,"A SPIRE, THIS COLOUR",cardX+cardW*.5f,cardTop+88*u,10*u,Fade(want,.85f));
+                // Where you are in the whole artwork: orientation without a spoiler.
+                float mapSize=118*u,mapX=w-pad-mapSize,mapY=h-pad-mapSize;
+                DrawRectangleRec({mapX,mapY,mapSize,mapSize},Fade({8,13,21,255},.86f));
+                DrawRectangleLinesEx({mapX,mapY,mapSize,mapSize},u,Fade(want,.3f));
+                double spanW=w/viewScale,spanH=h/viewScale;
+                float boxX=mapX+float(std::clamp((viewX-spanW*.5)*mapSize,0.0,double(mapSize)));
+                float boxY=mapY+float(std::clamp((viewY-spanH*.5)*mapSize,0.0,double(mapSize)));
+                float boxW=std::max(2.f,float(std::min(spanW*mapSize,double(mapSize)))),
+                      boxH=std::max(2.f,float(std::min(spanH*mapSize,double(mapSize))));
+                DrawRectangleLinesEx({boxX,boxY,std::min(boxW,mapX+mapSize-boxX),std::min(boxH,mapY+mapSize-boxY)},
+                                     std::max(1.f,u),Fade({214,240,232,255},.85f));
+                std::ostringstream zoomText;
+                zoomText<<"ZOOM  x"<<std::fixed<<std::setprecision(zoomLevel<100?1:0)<<zoomLevel
+                        <<"    DEPTH "<<deepest<<"    "<<drawn<<" MARKS";
+                text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {
                     float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);
                     centered(font,toast,w*.5f,pad-8*u,13*u,
                              Fade(reloadError.empty()?Color{124,235,210,255}:Color{240,172,138,255},alpha));
                 }
-                DrawRectangle(0,int(h-46*u),int(w),int(46*u),Fade({3,6,13,255},.82f));
-                centered(font,"DRAG  ORBIT     WHEEL / W S  ZOOM     RIGHT-CLICK  MARK IT     ESC  BACK",
+                DrawRectangle(0,int(h-46*u),int(w),int(46*u),Fade(deepColor,.8f));
+                centered(font,"DRAG  PAN     WHEEL / W S  ZOOM     RIGHT-CLICK  MARK IT     ESC  BACK",
                          w*.5f,h-30*u,10*u,{128,158,176,255});
                 EndDrawing();
                 if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
@@ -430,17 +433,20 @@ int main(int argc,char** argv) {
             }
             auto enterPlanet=[&](int track){
                 view=View::Planet;planetTrack=track;
-                camYaw=.6f;camPitch=.35f;camDist=PlanetRadius*5.6f;camDistWant=PlanetRadius*2.6f;
+                viewX=viewY=.5;viewScale=std::min(w,h)*.92;
                 enteredAt=elapsed;(void)enteredAt;
-                std::cout<<"[planet] entered "<<Names[track]<<std::endl;
+                std::cout<<"[world] entered "<<Names[track]<<std::endl;
             };
+            // Read the mixer live, not the mask snapshotted at the top of the
+            // frame: a track woken earlier this frame is already on.
+            uint32_t live=mixer.enabled;
             if(hoveredNode>=0&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 if(!progress.isUnlocked(hoveredNode))     {toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();}
-                else if(!(mask&(1u<<hoveredNode)))        {toast="Wake the signal to reach its world";toastAt=elapsed;reloadError.clear();}
+                else if(!(live&(1u<<hoveredNode)))        {toast="Wake the signal to reach its world";toastAt=elapsed;reloadError.clear();}
                 else enterPlanet(hoveredNode);
             }
             // Z drops into the frontier world without hunting a moving node.
-            if(IsKeyPressed(KEY_Z)&&progress.isUnlocked(progress.frontier())&&(mask&(1u<<progress.frontier())))
+            if(IsKeyPressed(KEY_Z)&&progress.isUnlocked(progress.frontier())&&(live&(1u<<progress.frontier())))
                 enterPlanet(progress.frontier());
             if(IsKeyPressed(KEY_ESCAPE))break;
             Rectangle pauseButton{margin, h-39*u,82*u,26*u};
@@ -620,8 +626,6 @@ int main(int argc,char** argv) {
         writeState(options,mixer,gpu,vendor,false);
         StopAudioStream(stream);UnloadAudioStream(stream);streamReady=false;
         CloseAudioDevice();audioReady=false;audioMixer=nullptr;
-        for(Mesh& mesh:propMesh)UnloadMesh(mesh);
-        UnloadMesh(globeMesh);UnloadShader(lit);
         UnloadRenderTexture(background);UnloadShader(shader);UnloadFont(font);CloseWindow();windowReady=false;
         return 0;
     } catch(const std::exception& error) {
