@@ -153,6 +153,24 @@ towns — and `bakeScene` draws it once into a 2560x1440 render texture. After
 that the view is only ever panning and zooming an image, with zoom bounded
 between fitting the frame and 9x.
 
+**Nobody stands alone.** Every person belongs to a *skit* -- a queue, a ring
+of talkers, a chase, a pair, an audience round a performer, a picnic, a work
+gang, or a stroll. A lone wanderer is a Stroll of one, so the rule has no
+exceptions: a figure is never placed on its own account. Crowds made of
+arrangements read as a place; crowds made of random dots read as noise.
+
+- **A skit belongs to exactly one track layer**, so toggling a track adds or
+  removes whole vignettes rather than half a queue. Asserted in
+  `tests/scene_test.cpp`, both per person and per skit.
+- The skit decides its members' poses; `rollFigure`'s random pose is
+  overwritten. That is what makes a queue look like a queue.
+- Which skits happen where depends on the anchor: queues and audiences in
+  towns, chases on roads, work gangs in fields, picnics on the shore. Weight
+  those lists rather than letting one kind appear in all of them -- `Pair` and
+  `Stroll` once drowned out every set piece because they were in every list.
+- Shore anchors are capped relative to inland ones. Filling the anchor list
+  with shoreline starved the towns of skits.
+
 **Layers are the whole idea.** Every world holds one crowd per track, and a
 crowd is only drawn while its track is playing. Unlock a track and every world
 gains people it never had, including ones you already searched; the second

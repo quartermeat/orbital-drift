@@ -96,7 +96,27 @@ struct Marker { float x, y, size; unsigned char palette; };   // scenery: waymar
 // already searched has people in it you have never seen.
 //
 // Drawn live rather than baked, so they stay sharp as you zoom.
-struct PersonSpot { float x, y, height; unsigned char layer; Figure figure; };
+struct PersonSpot { float x, y, height; unsigned char layer; int skit; Figure figure; };
+
+// A skit is a little vignette: a queue, a ring of talkers, a chase, a picnic.
+// Nobody is scattered on their own account -- every person belongs to one,
+// even a lone wanderer, which is a Stroll of one. Crowds made of arrangements
+// read as a place; crowds made of random dots read as noise.
+enum class SkitKind : unsigned char { Queue, Ring, Chase, Pair, Audience, Picnic, Work, Stroll };
+inline constexpr int SkitKindCount = 8;
+inline const char* skitName(SkitKind kind) {
+    switch (kind) {
+        case SkitKind::Queue: return "queue";
+        case SkitKind::Ring: return "ring";
+        case SkitKind::Chase: return "chase";
+        case SkitKind::Pair: return "pair";
+        case SkitKind::Audience: return "audience";
+        case SkitKind::Picnic: return "picnic";
+        case SkitKind::Work: return "work";
+        default: return "stroll";
+    }
+}
+struct Skit { SkitKind kind; float x, y; unsigned char layer; int members; };
 
 struct Scene {
     uint64_t seed = 0;
@@ -108,6 +128,7 @@ struct Scene {
     std::vector<Road> roads;
     std::vector<Marker> markers;
     std::vector<PersonSpot> people;
+    std::vector<Skit> skits;
     int target = -1;   // the person the find box shows; always in this world's own layer
     bool found = false;
 };
@@ -238,44 +259,144 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
         scene.markers.push_back({x, y, rng.range(15.f, 23.f),
                                  static_cast<unsigned char>(rng.below(PaletteSize))});
     }
-    // People, one set per track. Each layer is placed the same way but from its
-    // own seed, so turning a track on adds a crowd that was never there before.
-    for (int layer = 0; layer < layerCount; ++layer) {
-        Rng crowd(scene.seed ^ (uint64_t(layer + 1) * 0x9E3779B97F4A7C15ull));
-        auto addPerson = [&](float x, float y) {
-            if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
-            scene.people.push_back({x, y, crowd.range(11.f, 16.f),
-                                    static_cast<unsigned char>(layer), rollFigure(crowd)});
-        };
-        for (const Town& town : scene.towns) {
-            int count = 7 + crowd.below(11);
-            for (int i = 0; i < count; ++i) {
-                float angle = crowd.range(0, 6.2831853f), reach = town.radius * 1.15f * std::sqrt(crowd.unit());
-                addPerson(town.x + std::cos(angle) * reach, town.y + std::sin(angle) * reach);
-            }
-        }
-        for (const Road& road : scene.roads) {
-            int count = 2 + crowd.below(4);
-            for (int i = 0; i < count; ++i) {
-                float t = crowd.unit() * float(road.points.size() - 1);
-                size_t at = size_t(t);
-                float f = t - float(at);
-                const auto& a = road.points[at];
-                const auto& b = road.points[std::min(at + 1, road.points.size() - 1)];
-                addPerson(a.first + (b.first - a.first) * f + crowd.range(-16.f, 16.f),
-                          a.second + (b.second - a.second) * f + crowd.range(-16.f, 16.f));
-            }
-        }
-        for (const Field& field : scene.fields)
-            if (crowd.unit() < .45f)
-                addPerson(field.x + crowd.range(-.45f, .45f) * field.w,
-                          field.y + crowd.range(-.45f, .45f) * field.h);
-        for (int i = 0; i < 90; ++i) {
-            float x = crowd.range(0, float(SceneWidth)), y = crowd.range(0, float(SceneHeight));
-            float height = elevationAt(scene.seed, x, y);
-            if (height > ShoreLevel - .03f && height < ShoreLevel + .05f) addPerson(x, y);
+    // Where a skit can happen, and what sort of place it is.
+    struct Anchor { float x, y; unsigned char sort; };   // 0 town, 1 road, 2 field, 3 shore
+    std::vector<Anchor> anchors;
+    for (const Town& town : scene.towns) {
+        int spots = 3 + int(town.radius / 40);
+        for (int i = 0; i < spots; ++i) {
+            float angle = rng.range(0, 6.2831853f), reach = town.radius * std::sqrt(rng.unit());
+            anchors.push_back({town.x + std::cos(angle) * reach, town.y + std::sin(angle) * reach, 0});
         }
     }
+    for (const Road& road : scene.roads)
+        for (size_t i = 0; i + 1 < road.points.size(); ++i)
+            anchors.push_back({road.points[i].first, road.points[i].second, 1});
+    for (const Field& field : scene.fields) anchors.push_back({field.x, field.y, 2});
+    size_t inland = anchors.size(), shoreWanted = inland / 4 + 8;
+    for (int attempt = 0; attempt < 900 && anchors.size() - inland < shoreWanted; ++attempt) {
+        float x = rng.range(0, float(SceneWidth)), y = rng.range(0, float(SceneHeight));
+        float height = elevationAt(scene.seed, x, y);
+        if (height > ShoreLevel - .025f && height < ShoreLevel + .05f) anchors.push_back({x, y, 3});
+    }
+
+    // People, one set per track, placed as skits. Each layer is built the same
+    // way from its own seed, so turning a track on adds vignettes that were
+    // never there before.
+    for (int layer = 0; layer < layerCount && !anchors.empty(); ++layer) {
+        Rng crowd(scene.seed ^ (uint64_t(layer + 1) * 0x9E3779B97F4A7C15ull));
+        int skitCount = 52 + crowd.below(14);
+        for (int i = 0; i < skitCount; ++i) {
+            const Anchor& anchor = anchors[size_t(crowd.below(int(anchors.size())))];
+
+            // What happens somewhere depends on where it is.
+            SkitKind kind;
+            switch (anchor.sort) {
+                case 0: { static const SkitKind town[] = {SkitKind::Queue, SkitKind::Queue, SkitKind::Ring,
+                                                          SkitKind::Ring, SkitKind::Audience, SkitKind::Audience,
+                                                          SkitKind::Pair, SkitKind::Chase, SkitKind::Stroll};
+                          kind = town[crowd.below(9)]; break; }
+                case 1: { static const SkitKind road[] = {SkitKind::Chase, SkitKind::Chase, SkitKind::Stroll,
+                                                          SkitKind::Pair, SkitKind::Work};
+                          kind = road[crowd.below(5)]; break; }
+                case 2: { static const SkitKind farm[] = {SkitKind::Work, SkitKind::Work, SkitKind::Picnic,
+                                                          SkitKind::Pair};
+                          kind = farm[crowd.below(4)]; break; }
+                default: { static const SkitKind shore[] = {SkitKind::Picnic, SkitKind::Picnic, SkitKind::Stroll,
+                                                            SkitKind::Ring};
+                           kind = shore[crowd.below(4)]; break; }
+            }
+
+            int skitIndex = int(scene.skits.size());
+            int placed = 0;
+            float facing = crowd.range(0, 6.2831853f);
+            auto put = [&](float x, float y, unsigned char pose) {
+                if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
+                if (x < 8 || y < 8 || x > SceneWidth - 8 || y > SceneHeight - 8) return;
+                Figure figure = rollFigure(crowd);
+                figure.pose = pose;            // the skit decides what they are doing
+                scene.people.push_back({x, y, crowd.range(11.f, 16.f),
+                                        static_cast<unsigned char>(layer), skitIndex, figure});
+                ++placed;
+            };
+            auto pick = [&](std::initializer_list<int> poses) {
+                return static_cast<unsigned char>(*(poses.begin() + crowd.below(int(poses.size()))));
+            };
+            float step = crowd.range(17.f, 24.f);
+            float dx = std::cos(facing), dy = std::sin(facing) * .7f;   // the map is seen from above
+
+            switch (kind) {
+                case SkitKind::Queue: {
+                    int count = 3 + crowd.below(4);
+                    for (int j = 0; j < count; ++j)
+                        put(anchor.x + dx * step * float(j), anchor.y + dy * step * float(j),
+                            j == 0 ? pick({12, 10}) : pick({0, 1, 3}));   // reach/point at the head
+                    break;
+                }
+                case SkitKind::Ring: {
+                    int count = 3 + crowd.below(3);
+                    float radius = crowd.range(18.f, 27.f);
+                    for (int j = 0; j < count; ++j) {
+                        float a = facing + float(j) * 6.2831853f / float(count);
+                        put(anchor.x + std::cos(a) * radius, anchor.y + std::sin(a) * radius * .7f,
+                            pick({0, 2, 3, 10}));
+                    }
+                    break;
+                }
+                case SkitKind::Chase: {
+                    int count = 2 + crowd.below(2);
+                    for (int j = 0; j < count; ++j)
+                        put(anchor.x + dx * step * 1.7f * float(j), anchor.y + dy * step * 1.7f * float(j),
+                            pick({6, 4, 5}));
+                    break;
+                }
+                case SkitKind::Pair: {
+                    put(anchor.x, anchor.y, pick({10, 2, 3}));
+                    put(anchor.x + dx * step, anchor.y + dy * step, pick({3, 2, 0}));
+                    break;
+                }
+                case SkitKind::Audience: {
+                    put(anchor.x, anchor.y, pick({15, 16, 17, 9}));   // the turn
+                    int count = 4 + crowd.below(5);
+                    for (int j = 0; j < count; ++j) {
+                        float spread = (float(j % 4) - 1.5f) * step;
+                        float row = step * 1.5f * (1.f + float(j / 4));
+                        put(anchor.x - dy * spread + dx * row, anchor.y + dx * spread + dy * row,
+                            pick({0, 1, 9, 3}));
+                    }
+                    break;
+                }
+                case SkitKind::Picnic: {
+                    int count = 3 + crowd.below(3);
+                    for (int j = 0; j < count; ++j) {
+                        float a = facing + float(j) * 6.2831853f / float(count);
+                        float radius = crowd.range(12.f, 22.f);
+                        put(anchor.x + std::cos(a) * radius, anchor.y + std::sin(a) * radius * .7f,
+                            pick({20, 21, 22, 23}));
+                    }
+                    break;
+                }
+                case SkitKind::Work: {
+                    int count = 2 + crowd.below(3);
+                    for (int j = 0; j < count; ++j)
+                        put(anchor.x + crowd.range(-26.f, 26.f), anchor.y + crowd.range(-18.f, 18.f),
+                            pick({11, 14, 13, 23}));
+                    break;
+                }
+                default: {   // Stroll: one or two wanderers, still a skit
+                    int count = 1 + crowd.below(2);
+                    for (int j = 0; j < count; ++j)
+                        put(anchor.x + crowd.range(-14.f, 14.f) + dx * step * float(j),
+                            anchor.y + crowd.range(-10.f, 10.f) + dy * step * float(j),
+                            pick({4, 5, 7}));
+                    break;
+                }
+            }
+            if (placed > 0) scene.skits.push_back({kind, anchor.x, anchor.y,
+                                                   static_cast<unsigned char>(layer), placed});
+        }
+    }
+
     // Painter's order across every layer at once, so switching a layer on drops
     // its people into the right depth rather than on top of everything.
     std::sort(scene.people.begin(), scene.people.end(),

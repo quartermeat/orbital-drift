@@ -15,7 +15,8 @@ func usage() {
   od ci [pipeline.yaml]   run the whole pipeline (this is the one to run)
   od check <name>         one live check: controls | hot-reload | progression | find | revisit
   od campaigns            parse every campaigns/*.conf and report
-  od worlds               save a PNG of every world background`)
+  od worlds               save a PNG of every world background
+  od shot -world N -zoom K [-dev] -out f.png   capture one world at a zoom`)
 }
 
 func main() {
@@ -53,6 +54,8 @@ func main() {
 		}
 	case "campaigns":
 		os.Exit(checkCampaigns(root))
+	case "shot":
+		os.Exit(shot(root, os.Args[2:]))
 	case "worlds":
 		os.Exit(previewWorlds(root))
 	default:

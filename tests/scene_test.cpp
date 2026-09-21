@@ -8,6 +8,7 @@ static void require(bool condition,const char* message) {
 
 int main() {
     using namespace orbital;
+    constexpr int TrackLayers = 7;
     try {
         Rgb color{175,149,246};
         Scene a=generateScene(3,color,7),b=generateScene(3,color,7);
@@ -26,6 +27,37 @@ int main() {
         require(a.target>=0&&a.target<int(a.people.size()),"the target is a real person");
         require(countOutfitMatches(a)==1,"nobody else wears the target's outfit");
         require(a.people[size_t(a.target)].height>8,"the target is a normal-sized person");
+
+        // The rule: nobody is in a scene without being part of something.
+        require(!a.skits.empty(),"a world has skits");
+        std::vector<int> members(a.skits.size(),0);
+        for (const PersonSpot& spot:a.people) {
+            require(spot.skit>=0&&spot.skit<int(a.skits.size()),"every person belongs to a real skit");
+            require(a.skits[size_t(spot.skit)].layer==spot.layer,"a person's skit is in their own layer");
+            ++members[size_t(spot.skit)];
+        }
+        for (size_t i=0;i<a.skits.size();++i) {
+            require(members[i]>0,"no skit is empty");
+            require(members[i]==a.skits[i].members,"a skit's member count matches its people");
+            require(a.skits[i].layer<TrackLayers,"a skit names a real track layer");
+        }
+        // A skit belongs to exactly one track layer, so toggling a track adds
+        // or removes whole vignettes rather than half a queue.
+        std::map<int,int> layerOf;
+        for (const PersonSpot& spot:a.people) {
+            auto seen=layerOf.find(spot.skit);
+            if (seen==layerOf.end()) layerOf[spot.skit]=spot.layer;
+            else require(seen->second==spot.layer,"every member of a skit is in the same layer");
+        }
+        std::map<int,int> kinds;
+        for (const Skit& skit:a.skits) ++kinds[int(skit.kind)];
+        require(kinds.size()==size_t(SkitKindCount),"every kind of skit happens somewhere");
+        // A skit is a group in one place, not people scattered under one label.
+        for (const PersonSpot& spot:a.people) {
+            const Skit& skit=a.skits[size_t(spot.skit)];
+            float dx=spot.x-skit.x,dy=spot.y-skit.y;
+            require(dx*dx+dy*dy<260.f*260.f,"a skit's people stand together");
+        }
 
         // Nothing may sit in the sea, or the place stops reading as a place.
         for (const Town& town:a.towns) {

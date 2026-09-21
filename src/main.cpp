@@ -133,7 +133,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.15.1\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.16.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -189,7 +189,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.15.1\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.16.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -307,10 +307,14 @@ int main(int argc,char** argv) {
         bool finishing=false,panBlocked=false;
         bool captured=false;
         long frame=0;
+        bool captureNow=false;
         std::string toast;
         while(!WindowShouldClose()&&!interrupted) {
             double elapsed=GetTime()-started;
             if(options.seconds>0&&elapsed>=options.seconds)break;
+            // F2 captures on demand: a screenshot driver needs to choose the
+            // moment, not race a fixed delay.
+            if(IsKeyPressed(KEY_F2)&&!options.capture.empty())captureNow=true;
             // Data reload only. The mixer, the stems and the playhead are never
             // rebuilt here, so playback continues straight through a reload.
             if(++frame%8==0) {
@@ -378,7 +382,7 @@ int main(int argc,char** argv) {
                          Fade({110,142,162,255},reveal*(.55f+.45f*std::sin(now*1.6f))));
                 EndDrawing();
                 if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
-                if(!options.capture.empty()&&!captured&&elapsed>options.captureAfter) {
+                if(!options.capture.empty()&&!captured&&(captureNow||elapsed>options.captureAfter)) {
                     fs::create_directories(options.capture.parent_path());
                     Image shot=LoadImageFromScreen();
                     captured=ExportImage(shot,options.capture.c_str());UnloadImage(shot);
@@ -640,7 +644,7 @@ int main(int argc,char** argv) {
                          w*.5f,h-30*u,10*u,{128,158,176,255});
                 EndDrawing();
                 if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
-                if(!options.capture.empty()&&!captured&&elapsed>options.captureAfter) {
+                if(!options.capture.empty()&&!captured&&(captureNow||elapsed>options.captureAfter)) {
                     fs::create_directories(options.capture.parent_path());
                     Image shot=LoadImageFromScreen();
                     captured=ExportImage(shot,options.capture.c_str());UnloadImage(shot);
@@ -865,7 +869,7 @@ int main(int argc,char** argv) {
             DrawCircleV({volumeBar.x+volumeBar.width*mixer.volume,volumeBar.y+2*u},4*u,{196,235,225,255});
             EndDrawing();
             if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
-            if(!options.capture.empty()&&!captured&&elapsed>options.captureAfter) {
+            if(!options.capture.empty()&&!captured&&(captureNow||elapsed>options.captureAfter)) {
                 fs::create_directories(options.capture.parent_path());
                 Image screenshot=LoadImageFromScreen();
                 bool saved=ExportImage(screenshot,options.capture.c_str());UnloadImage(screenshot);

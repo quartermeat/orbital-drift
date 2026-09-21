@@ -4,11 +4,13 @@ package main
 // of every world can still be produced.
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"time"
 	"strings"
 )
 
@@ -92,5 +94,50 @@ func previewWorlds(root string) int {
 		return 1
 	}
 	fmt.Printf("PASS: %d world backgrounds saved to %s\n", made, out)
+	return 0
+}
+
+// shot captures one world at a chosen zoom. Driving a window from a shell
+// script means fighting backgrounding and focus; the App driver already knows
+// how, so screenshots live here too.
+func shot(root string, args []string) int {
+	set := flag.NewFlagSet("shot", flag.ExitOnError)
+	world := set.Int("world", 0, "which world to open")
+	clicks := set.Int("zoom", 0, "wheel clicks to zoom in")
+	out := set.String("out", "artifacts/shot.png", "where to write the PNG")
+	dev := set.Bool("dev", false, "dev overlay")
+	_ = set.Parse(args)
+
+	target := *out
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, target)
+	}
+	_ = os.MkdirAll(filepath.Dir(target), 0o755)
+	_ = os.Remove(target)
+
+	launch := []string{"--world", fmt.Sprint(*world), "--capture", target,
+		"--capture-after", "60", "--seconds", "90"}
+	if *dev {
+		launch = append(launch, "--dev")
+	}
+	app, err := Launch(root, "shot", launch...)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "FAIL: "+err.Error())
+		return 1
+	}
+	defer app.Close()
+	if *clicks > 0 {
+		app.Wheel(*clicks, app.Width/2, app.Height/2)
+	}
+	time.Sleep(900 * time.Millisecond)
+	state := app.State()
+	// The app captures on its own clock; ask for it now that the view is set.
+	app.Key("F2")
+	time.Sleep(1200 * time.Millisecond)
+	if _, err := os.Stat(target); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: no image written to %s\n", target)
+		return 1
+	}
+	fmt.Printf("PASS: %s at zoom %.1f, %d fps\n", target, state.Planet.Zoom, state.FPS)
 	return 0
 }
