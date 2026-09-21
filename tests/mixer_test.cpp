@@ -8,9 +8,11 @@ void require(bool condition,const char* message) {
 int main() {
     using namespace orbital;
     Mixer m;
+    m.trackCount=7;
     m.frames=10000;
     m.volume=1;
-    for (auto& track:m.tracks) {
+    for (int t=0;t<m.trackCount;++t) {
+        auto& track=m.tracks[t];
         track.resize(m.frames*2);
         for (size_t i=0;i<m.frames;++i) {
             track[i*2]=.01f+float(i)*.000001f;
@@ -21,8 +23,8 @@ int main() {
     m.render(out.data(),4096);
     require(m.position==4096,"one shared cursor advances");
     require(out.front()==0 || std::abs(out.front())<.0001,"startup fades in");
-    for (int track=0; track<TrackCount; ++track) {
-        m.enabled=AllTracks^(1u<<track);
+    for (int track=0; track<m.trackCount; ++track) {
+        m.enabled=m.allMask()^(1u<<track);
         m.render(out.data(),2048);
         auto expected=(.01f+float((m.cursor+m.frames-1)%m.frames)*.000001f)*6;
         require(std::abs(out[2047*2]-expected)<.00001,"each toggle removes exactly one stem");
@@ -44,7 +46,7 @@ int main() {
     m.render(out.data(),2048);
     require(m.cursor==before,"pause freezes the shared cursor after its fade");
     m.playing=true;
-    m.enabled=AllTracks;
+    m.enabled=m.allMask();
     m.render(out.data(),2048);
     require(m.cursor==(before+2048)%m.frames,"resume continues from paused position");
     require(m.outputRms>0,"resume produces sound");

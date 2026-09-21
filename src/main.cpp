@@ -1,5 +1,6 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
+#include "campaign.hpp"
 #include "progress.hpp"
 #include "scene.hpp"
 #include "figure.hpp"
@@ -21,14 +22,15 @@ static void audioCallback(void* output,unsigned frames) { audioMixer->render(sta
 static void onSignal(int) {interrupted=1;}
 // Colours and role labels live in assets/layers.conf and reload while running.
 static LayerConfig layers;
-static std::array<Color,TrackCount> Colors{};
+static Campaign campaign;
+static std::array<Color,MaxTracks> Colors{};
 static int configReloads=0,shaderReloads=0;
 static std::string reloadError;
 static Progress progress;
 static bool sigilVisible=false;
 static float sigilX=0,sigilY=0,mouseX=0,mouseY=0;
 static bool sigilHot=false;
-enum class View { System, Planet };
+enum class View { System, Planet, Finale };
 static View view=View::System;
 static int planetTrack=-1;
 static bool beaconOnScreen=false,beaconFound=false;
@@ -68,8 +70,12 @@ static Texture2D bakeTerrain(const Scene& scene) {
 }
 
 static void applyLayers() {
-    for(int i=0;i<TrackCount;++i)Colors[i]=Color{layers.colors[i].r,layers.colors[i].g,layers.colors[i].b,255};
+    for(int i=0;i<campaign.count();++i) {
+        Rgb c=campaign.tracks[size_t(i)].colour;
+        Colors[i]=Color{c.r,c.g,c.b,255};
+    }
 }
+static const char* trackName(int i) { return campaign.tracks[size_t(i)].name.c_str(); }
 // Keeps the previous shader when a save does not compile, so a typo in a live
 // session cannot take down the window or the audio with it.
 static bool reloadShader(Shader& shader,int& resLoc,int& timeLoc,int& energyLoc,const fs::path& path,std::string& note) {
@@ -90,6 +96,7 @@ struct Options {
     fs::path assets=fs::canonical("/proc/self/exe").parent_path().parent_path()/"assets";
     fs::path state=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"state.json";
     fs::path capture;
+    fs::path campaignFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"campaigns"/"orbital-drift.conf";
     fs::path progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"progress.json";
     bool windowed=false,check=false,resume=false,gallery=false,dev=false;
     int world=-1;
@@ -119,7 +126,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.12.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.13.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -129,22 +136,23 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
        <<",\"volume\":"<<mixer.volume.load()
        <<",\"hot_reload\":{\"config_reloads\":"<<configReloads<<",\"shader_reloads\":"<<shaderReloads
        <<",\"last_error\":"<<quote(reloadError)<<"}"
-       <<",\"progress\":{\"unlocked\":"<<progress.unlocked<<",\"frontier\":"<<quote(Names[progress.frontier()])
-       <<",\"next_locked\":"<<(progress.nextLocked()>=0?quote(Names[progress.nextLocked()]):std::string("null"))
+       <<",\"progress\":{\"unlocked\":"<<progress.unlocked<<",\"frontier\":"<<quote(trackName(progress.frontier()))
+       <<",\"next_locked\":"<<(progress.nextLocked()>=0?quote(trackName(progress.nextLocked())):std::string("null"))
        <<",\"sigil_visible\":"<<(sigilVisible?"true":"false")
        <<",\"sigil_x\":"<<int(sigilX)<<",\"sigil_y\":"<<int(sigilY)
+       <<",\"complete\":"<<(progress.complete()?"true":"false")
        <<",\"sigil_hot\":"<<(sigilHot?"true":"false")<<",\"mouse_x\":"<<int(mouseX)<<",\"mouse_y\":"<<int(mouseY)
-       <<"},\"planet\":{\"view\":"<<quote(view==View::Planet?"planet":"system")
-       <<",\"track\":"<<(planetTrack>=0?quote(Names[planetTrack]):std::string("null"))
+       <<"},\"planet\":{\"view\":"<<quote(view==View::Planet?"planet":(view==View::Finale?"finale":"system"))
+       <<",\"track\":"<<(planetTrack>=0?quote(trackName(planetTrack)):std::string("null"))
        <<",\"beacon_on_screen\":"<<(beaconOnScreen?"true":"false")<<",\"beacon_found\":"<<(beaconFound?"true":"false")
        <<",\"beacon_x\":"<<int(beaconX)<<",\"beacon_y\":"<<int(beaconY)<<",\"zoom\":"<<zoomLevel
        <<",\"view_x\":"<<viewCenterX<<",\"view_y\":"<<viewCenterY
        <<",\"beacon_world_x\":"<<beaconWorldX<<",\"beacon_world_y\":"<<beaconWorldY<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
        <<",\"tracks\":[";
     uint32_t mask=mixer.enabled;
-    for(int i=0;i<TrackCount;++i) {
+    for(int i=0;i<campaign.count();++i) {
         if(i)out<<',';
-        out<<"{\"name\":"<<quote(Names[i])<<",\"enabled\":"<<((mask&(1u<<i))?"true":"false")
+        out<<"{\"name\":"<<quote(trackName(i))<<",\"enabled\":"<<((mask&(1u<<i))?"true":"false")
            <<",\"unlocked\":"<<(progress.isUnlocked(i)?"true":"false")<<",\"level\":"<<mixer.levels[i].load()<<'}';
     }
     out<<"]\n}\n";out.close();
@@ -166,6 +174,7 @@ int main(int argc,char** argv) {
             else if(arg=="--resume")options.resume=true;
             else if(arg=="--gallery")options.gallery=true;
             else if(arg=="--dev")options.dev=true;
+            else if(arg=="--campaign")options.campaignFile=fs::absolute(value());
             else if(arg=="--world")options.world=std::stoi(value());
             else if(arg=="--capture-after")options.captureAfter=std::stod(value());
             else if(arg=="--assets")options.assets=fs::absolute(value());
@@ -173,11 +182,18 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.12.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
-                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --capture-after SECONDS\n";return 0;
+                std::cout<<"Orbital Drift 0.13.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
-        mixer.load(options.assets/"audio");
+        campaign=loadCampaign(options.campaignFile);
+        if(!campaign.note.empty())std::cout<<"[campaign] "<<campaign.note<<std::endl;
+        if(campaign.tracks.empty())throw std::runtime_error("Campaign has no tracks: "+options.campaignFile.string());
+        std::vector<std::string> stemFiles;
+        for(const CampaignTrack& track:campaign.tracks)stemFiles.push_back(track.file);
+        mixer.load(options.assets/campaign.stems,stemFiles);
+        std::cout<<"[campaign] "<<campaign.title<<": "<<campaign.count()<<" tracks, "
+                 <<campaign.tempo<<" BPM, unlock "<<(campaign.rightToLeft?"right to left":"left to right")<<std::endl;
         if(options.check) {
             double energy=0;float peak=0;
             for(size_t sample=0;sample<mixer.frames*2;++sample) {
@@ -193,7 +209,7 @@ int main(int argc,char** argv) {
         std::signal(SIGINT,onSignal);std::signal(SIGTERM,onSignal);
         SetTraceLogLevel(LOG_INFO);
         SetConfigFlags(FLAG_VSYNC_HINT|FLAG_MSAA_4X_HINT|FLAG_WINDOW_RESIZABLE);
-        InitWindow(1440,900,"Orbital Drift");windowReady=true;
+        InitWindow(1440,900,campaign.title.c_str());windowReady=true;
         SetWindowMinSize(1000,650);
         SetExitKey(KEY_NULL);   // Esc leaves the planet first; quitting is handled by hand
         if(!options.windowed) {
@@ -211,14 +227,15 @@ int main(int argc,char** argv) {
             throw std::runtime_error("Missing graphics assets; run python3 scripts/setup.py");
         // State is saved every run, but a launch starts over unless --resume
         // asks for the previous one; resuming matters later, not yet.
-        progress=options.resume?loadProgress(options.progressFile):Progress{};
+        progress=options.resume?loadProgress(options.progressFile,campaign.count(),campaign.rightToLeft):Progress{};
+        progress.count=campaign.count();progress.rightToLeft=campaign.rightToLeft;
         saveProgress(options.progressFile,progress);
         mixer.enabled=0;   // the drift begins in silence
-        std::cout<<"[progress] "<<progress.unlocked<<" of "<<TrackCount<<" unlocked; frontier "<<Names[progress.frontier()]
+        std::cout<<"[progress] "<<progress.unlocked<<" of "<<campaign.count()<<" unlocked; frontier "<<trackName(progress.frontier())
                  <<(options.resume?" (resumed)":" (fresh run)")<<"; starting silent"<<std::endl;
         layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
         if(!layers.note.empty())std::cout<<"[config] "<<layers.note<<std::endl;
-        if(options.gallery||options.world>=0){progress.unlocked=TrackCount;mixer.enabled=AllTracks;}
+        if(options.gallery||options.world>=0){progress.unlocked=campaign.count();mixer.enabled=mixer.allMask();}
         Font font=LoadFontEx((options.assets/"font.ttf").c_str(),72,nullptr,0);
         if(!IsFontValid(font))throw std::runtime_error("Cannot load UI font");
         GenTextureMipmaps(&font.texture);
@@ -226,15 +243,15 @@ int main(int argc,char** argv) {
         Shader shader=LoadShader(nullptr,(options.assets/"space.fs").c_str());
         if(!IsShaderValid(shader)||shader.id==rlGetShaderIdDefault())throw std::runtime_error("Space shader failed to compile");
         int resLoc=GetShaderLocation(shader,"resolution"),timeLoc=GetShaderLocation(shader,"time"),energyLoc=GetShaderLocation(shader,"energy");
-        std::array<Scene,TrackCount> scenes{};
-        std::array<Texture2D,TrackCount> sheets{};
-        std::array<bool,TrackCount> baked{};
+        std::array<Scene,MaxTracks> scenes{};
+        std::array<Texture2D,MaxTracks> sheets{};
+        std::array<bool,MaxTracks> baked{};
         auto worldSheet=[&](int track)->Texture2D&{
             if(!baked[size_t(track)]) {
-                scenes[size_t(track)]=generateScene(track,layers.colors[size_t(track)]);
+                scenes[size_t(track)]=generateScene(track,campaign.tracks[size_t(track)].colour,campaign.count());
                 sheets[size_t(track)]=bakeTerrain(scenes[size_t(track)]);
                 baked[size_t(track)]=true;
-                std::cout<<"[world] baked "<<Names[track]<<std::endl;
+                std::cout<<"[world] baked "<<trackName(track)<<std::endl;
             }
             return sheets[size_t(track)];
         };
@@ -249,9 +266,9 @@ int main(int argc,char** argv) {
         stream=LoadAudioStream(SampleRate,32,2);streamReady=IsAudioStreamValid(stream);
         if(!streamReady)throw std::runtime_error("Cannot create stereo audio stream");
         audioMixer=&mixer;SetAudioStreamCallback(stream,audioCallback);PlayAudioStream(stream);
-        std::cout<<"[audio] 7 synchronized stems, 48000 Hz stereo, "<<mixer.frames<<" frames per loop"<<std::endl;
-        std::array<std::array<float,80>,TrackCount> waves{};
-        for(int i=0;i<TrackCount;++i)for(int j=0;j<80;++j) {
+        std::cout<<"[audio] "<<mixer.trackCount<<" synchronized stems, 48000 Hz stereo, "<<mixer.frames<<" frames per loop"<<std::endl;
+        std::array<std::array<float,80>,MaxTracks> waves{};
+        for(int i=0;i<campaign.count();++i)for(int j=0;j<80;++j) {
             size_t offset=size_t(j)*mixer.frames/80;
             double sum=0;for(size_t k=0;k<512;++k) {float v=mixer.tracks[i][((offset+k)%mixer.frames)*2];sum+=v*v;}
             waves[i][j]=std::min(1.f,float(std::sqrt(sum/512))*9);
@@ -263,7 +280,7 @@ int main(int argc,char** argv) {
                 GetRandomValue(3,14)/10.f,GetRandomValue(0,100)/10.f});
         };
         makeStars();
-        std::array<float,TrackCount> visibility{},meter{};
+        std::array<float,MaxTracks> visibility{},meter{};
         double unlockedAt=-9;std::string unlockedName;
         // The view into a world: where we are looking, and how many pixels one
         // canvas unit covers. Doubles, because deep zoom runs out of float fast.
@@ -271,11 +288,12 @@ int main(int argc,char** argv) {
         double enteredAt=-9;
         float sigilPulse=0;
         if(options.gallery||options.world>=0) {
-            view=View::Planet;planetTrack=std::clamp(options.world,0,TrackCount-1);
+            view=View::Planet;planetTrack=std::clamp(options.world,0,campaign.count()-1);
             viewScale=std::min(GetScreenWidth()/double(SceneWidth),GetScreenHeight()/double(SceneHeight));
             viewX=SceneWidth*.5;viewY=SceneHeight*.5;
         }
-        double started=GetTime(),lastState=-1,toastAt=-9;
+        double started=GetTime(),lastState=-1,toastAt=-9,finaleAt=-9;
+        bool finishing=false;
         bool captured=false;
         long frame=0;
         std::string toast;
@@ -296,13 +314,66 @@ int main(int argc,char** argv) {
                     int previousStars=layers.starCount;
                     layers=loadLayerConfig(options.assets/"layers.conf");applyLayers();
                     if(layers.starCount!=previousStars)makeStars();
-                    for(int i=0;i<TrackCount;++i)if(baked[i]){UnloadTexture(sheets[i]);baked[i]=false;}
+                    for(int i=0;i<campaign.count();++i)if(baked[i]){UnloadTexture(sheets[i]);baked[i]=false;}
                     ++configReloads;reloadError=layers.note;
                     toast=layers.note.empty()?"layers.conf reloaded":"layers.conf: "+layers.note;
                     toastAt=elapsed;std::cout<<"[reload] "<<toast<<std::endl;
                 }
             }
             float w=float(GetScreenWidth()),h=float(GetScreenHeight()),u=std::min(w/1600.f,h/900.f);
+            // ---------- finale: the whole mix, drawn ----------
+            if(view==View::Finale) {
+                float age=float(elapsed-finaleAt),now=float(elapsed);
+                if(IsKeyPressed(KEY_ESCAPE)||IsKeyPressed(KEY_BACKSPACE)) {
+                    view=View::System;std::cout<<"[campaign] finale closed"<<std::endl;
+                }
+                float loop=float(mixer.position.load())/float(std::max<size_t>(1,mixer.frames));
+                float beat=loop*float(campaign.bars*4);
+                float energy=std::min(1.f,mixer.outputRms.load()*layers.energyGain);
+                Vector2 middle{w*.5f,h*.5f};
+                float span=std::min(w,h);
+                BeginDrawing();ClearBackground({3,5,11,255});
+                for(auto star:stars)
+                    DrawCircleV({star.x*w,star.y*h},star.r*u*(.6f+energy*.5f),
+                                Fade({198,220,240,255},.10f+.24f*std::sin(now*.4f+star.phase)));
+                // One ring per track, each breathing on its own level. Together
+                // they are the mix, seen instead of heard.
+                for(int i=campaign.count()-1;i>=0;--i) {
+                    float level=std::min(1.f,mixer.levels[i].load()*7.f);
+                    float radius=span*(.10f+.041f*float(i))*(1.f+level*.13f);
+                    Color c=Colors[i];
+                    int points=120;
+                    for(int j=0;j<points;++j) {
+                        float a=float(j)*2*PI/float(points),b=float(j+1)*2*PI/float(points);
+                        float wobbleA=1.f+level*.22f*std::sin(a*float(3+i)+now*(.7f+.11f*float(i)));
+                        float wobbleB=1.f+level*.22f*std::sin(b*float(3+i)+now*(.7f+.11f*float(i)));
+                        DrawLineEx({middle.x+std::cos(a)*radius*wobbleA,middle.y+std::sin(a)*radius*wobbleA},
+                                   {middle.x+std::cos(b)*radius*wobbleB,middle.y+std::sin(b)*radius*wobbleB},
+                                   (1.1f+level*2.6f)*u,Fade(c,.20f+level*.68f));
+                    }
+                    float angle=now*(.16f+.035f*float(i));
+                    glow({middle.x+std::cos(angle)*radius,middle.y+std::sin(angle)*radius},
+                         (3.5f+level*11.f)*u,c,.35f+level*.55f);
+                }
+                float pulse=std::exp(-(beat-std::floor(beat))*5.f)*energy;
+                glow(middle,(26+energy*22+pulse*16)*u,{150,236,226,255},.26f+energy*.4f);
+                DrawCircleLinesV(middle,span*(.072f+pulse*.006f),Fade({170,240,232,255},.35f+energy*.3f));
+                float reveal=std::min(1.f,age*.55f);
+                centered(font,campaign.title,middle.x,h*.16f,52*u,Fade({236,244,248,255},reveal));
+                centered(font,"EVERY SIGNAL IS YOURS",middle.x,h*.16f+62*u,15*u,Fade({150,206,196,255},reveal*.95f));
+                centered(font,std::to_string(campaign.count())+" OF "+std::to_string(campaign.count())+" TRACKS PLAYING",
+                         middle.x,h-96*u,12*u,Fade({132,166,186,255},reveal*.9f));
+                centered(font,"ESC  RETURN TO THE GALAXY",middle.x,h-64*u,11*u,
+                         Fade({110,142,162,255},reveal*(.55f+.45f*std::sin(now*1.6f))));
+                EndDrawing();
+                if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
+                if(!options.capture.empty()&&!captured&&elapsed>options.captureAfter) {
+                    fs::create_directories(options.capture.parent_path());
+                    Image shot=LoadImageFromScreen();
+                    captured=ExportImage(shot,options.capture.c_str());UnloadImage(shot);
+                }
+                continue;
+            }
             // ---------- world view: pan and zoom the planet's background image ----------
             if(view==View::Planet) {
                 Scene& scene=scenes[size_t(planetTrack)];
@@ -310,12 +381,12 @@ int main(int argc,char** argv) {
                 float step=std::min(GetFrameTime(),.1f);
                 bool leaving=IsKeyPressed(KEY_ESCAPE)||IsKeyPressed(KEY_BACKSPACE);
                 if(options.gallery)
-                    for(int i=0;i<TrackCount;++i)
+                    for(int i=0;i<campaign.count();++i)
                         if(IsKeyPressed(KEY_ONE+i)&&i!=planetTrack) {
                             planetTrack=i;worldSheet(i);
                             viewScale=std::min(w/float(SceneWidth),h/float(SceneHeight));
                             viewX=SceneWidth*.5;viewY=SceneHeight*.5;
-                            std::cout<<"[gallery] "<<Names[i]<<std::endl;
+                            std::cout<<"[gallery] "<<trackName(i)<<std::endl;
                         }
                 Vector2 pointer=GetMousePosition();
                 double halfW=w*.5,halfH=h*.5;
@@ -374,14 +445,17 @@ int main(int argc,char** argv) {
                     scene.found=beaconFound=true;
                     toast="Found them";toastAt=elapsed;reloadError.clear();
                     if(!progress.complete()&&planetTrack==progress.frontier()) {
-                        unlockedName=Names[progress.nextLocked()];
+                        unlockedName=trackName(progress.nextLocked());
                         progress.advance();saveProgress(options.progressFile,progress);
                         // The new track starts playing, which lights its layer
                         // in every world including this one.
                         mixer.enabled|=1u<<progress.frontier();unlockedAt=elapsed;
-                        std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<TrackCount<<')'<<std::endl;
+                        std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<campaign.count()<<')'<<std::endl;
                     }
-                    leaving=true;   // back up to the galaxy to hear what changed
+                    // Completing the campaign goes to the finale; otherwise back
+                    // up to the galaxy to hear what just arrived.
+                    finishing=progress.complete();
+                    leaving=true;
                 }
                 SetMouseCursor(overBeacon?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
 
@@ -454,7 +528,7 @@ int main(int argc,char** argv) {
                 }
                 int drawnPeople=0,layersOn=0;
                 uint32_t playing=mixer.enabled;
-                for(int i=0;i<TrackCount;++i)layersOn+=(playing>>i)&1u;
+                for(int i=0;i<campaign.count();++i)layersOn+=(playing>>i)&1u;
                 for(const PersonSpot& spot:scene.people) {
                     // A layer exists only while its track does.
                     if(!((playing>>spot.layer)&1u))continue;
@@ -489,7 +563,7 @@ int main(int argc,char** argv) {
                 DrawRectangleRounded({pad-16*u,pad-24*u,470*u,98*u},.08f,8,Fade(edge,.94f));
                 text(font,options.gallery?"GALLERY":(options.dev?"WORLD  /  DEV":"WORLD"),pad,pad-10*u,12*u,
                      options.dev?Color{226,142,142,255}:Color{118,150,172,255});
-                text(font,Names[planetTrack],pad,pad+8*u,34*u,{231,238,244,255});
+                text(font,trackName(planetTrack),pad,pad+8*u,34*u,{231,238,244,255});
                 text(font,scene.found?"This world has given up its secret"
                                      :(options.gallery?"1-7 switch worlds. Drag to pan, wheel to zoom."
                                                       :"Someone down there is dressed like this. Zoom in and look."),
@@ -519,7 +593,7 @@ int main(int argc,char** argv) {
                 DrawRectangleLinesEx({boxX,boxY,boxW,boxH},std::max(1.f,u),Fade({214,240,232,255},.85f));
                 std::ostringstream zoomText;
                 zoomText<<"ZOOM  x"<<std::fixed<<std::setprecision(1)<<zoomLevel
-                        <<"    "<<layersOn<<" OF "<<TrackCount<<" LAYERS SHOWING    "
+                        <<"    "<<layersOn<<" OF "<<campaign.count()<<" LAYERS SHOWING    "
                         <<drawnPeople<<" PEOPLE IN VIEW";
                 text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {
@@ -541,8 +615,11 @@ int main(int argc,char** argv) {
                     captured=ExportImage(shot,options.capture.c_str());UnloadImage(shot);
                 }
                 if(leaving) {
-                    view=View::System;planetTrack=-1;beaconOnScreen=false;
-                    std::cout<<"[world] left"<<std::endl;
+                    view=finishing?View::Finale:View::System;
+                    planetTrack=-1;beaconOnScreen=false;
+                    if(finishing){finaleAt=elapsed;std::cout<<"[campaign] complete"<<std::endl;}
+                    else std::cout<<"[world] left"<<std::endl;
+                    finishing=false;
                 }
                 continue;
             }
@@ -552,11 +629,11 @@ int main(int argc,char** argv) {
             uint32_t mask=mixer.enabled;
             float dt=std::min(GetFrameTime(),.1f),motion=float(elapsed);
             float loopPos=float(mixer.position.load())/float(mixer.frames);
-            float beat=loopPos*64;
-            std::array<Vector2,TrackCount> nodes{};
-            std::array<Rectangle,TrackCount> cards{};
+            float beat=loopPos*float(campaign.bars*4);
+            std::array<Vector2,MaxTracks> nodes{};
+            std::array<Rectangle,MaxTracks> cards{};
             int hovered=-1,hoveredNode=-1;
-            for(int i=0;i<TrackCount;++i) {
+            for(int i=0;i<campaign.count();++i) {
                 float orbit=radius*(layers.orbitBase+i*layers.orbitStep);
                 float angle=motion*(.055f+i*.009f)+float(i)*2.39996f;
                 nodes[i]={center.x+std::cos(angle)*orbit,center.y+std::sin(angle)*orbit*.56f};
@@ -567,7 +644,7 @@ int main(int argc,char** argv) {
                     if(!progress.isUnlocked(i)) {
                         toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();
                     } else {
-                        mixer.toggle(i);std::cout<<"[track] "<<(i+1)<<' '<<Names[i]<<' '<<((mixer.enabled&(1u<<i))?"on":"off")<<std::endl;
+                        mixer.toggle(i);std::cout<<"[track] "<<(i+1)<<' '<<trackName(i)<<' '<<((mixer.enabled&(1u<<i))?"on":"off")<<std::endl;
                     }
                 }
             }
@@ -576,7 +653,7 @@ int main(int argc,char** argv) {
                 viewScale=std::min(w/double(SceneWidth),h/double(SceneHeight));
                 viewX=SceneWidth*.5;viewY=SceneHeight*.5;
                 enteredAt=elapsed;(void)enteredAt;
-                std::cout<<"[world] entered "<<Names[track]<<std::endl;
+                std::cout<<"[world] entered "<<trackName(track)<<std::endl;
             };
             // Read the mixer live, not the mask snapshotted at the top of the
             // frame: a track woken earlier this frame is already on.
@@ -589,6 +666,7 @@ int main(int argc,char** argv) {
             // Z drops into the frontier world without hunting a moving node.
             if(IsKeyPressed(KEY_Z)&&progress.isUnlocked(progress.frontier())&&(live&(1u<<progress.frontier())))
                 enterPlanet(progress.frontier());
+            if(IsKeyPressed(KEY_V)&&progress.complete()) {view=View::Finale;finaleAt=elapsed;}
             if(IsKeyPressed(KEY_ESCAPE))break;
             Rectangle pauseButton{margin, h-39*u,82*u,26*u};
             Rectangle allButton{margin+97*u,h-39*u,82*u,26*u};
@@ -625,7 +703,7 @@ int main(int argc,char** argv) {
                 enterPlanet(frontier);
             bool hot=onSigil||hoveredNode>=0||hovered>=0||CheckCollisionPointRec(mouse,pauseButton)||CheckCollisionPointRec(mouse,allButton)||CheckCollisionPointRec(mouse,silenceButton)||CheckCollisionPointRec(mouse,volumeHit);
             SetMouseCursor(hot?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
-            for(int i=0;i<TrackCount;++i) {
+            for(int i=0;i<campaign.count();++i) {
                 visibility[i]+=(float(bool(mask&(1u<<i)))-visibility[i])*(1-std::exp(-dt*7));
                 meter[i]+=(mixer.levels[i].load()*6-meter[i])*(1-std::exp(-dt*13));
             }
@@ -643,17 +721,17 @@ int main(int argc,char** argv) {
                 float alpha=.18f+.22f*(.5f+.5f*std::sin(motion*.25f+star.phase));
                 DrawCircleV({star.x*w+(mouse.x/w-.5f)*star.r*7,star.y*h+(mouse.y/h-.5f)*star.r*7},star.r*u,Fade({187,213,231,255},alpha));
             }
-            text(font,"ORBITAL / 001",margin,30*u,13*u,{123,157,177,255});
-            text(font,"Orbital Drift",margin,53*u,46*u,{232,239,244,255});
-            text(font,"Build a world out of sound.",margin,109*u,16*u,{144,161,183,255});
+            text(font,"CAMPAIGN",margin,30*u,13*u,{123,157,177,255});
+            text(font,campaign.title,margin,53*u,46*u,{232,239,244,255});
+            text(font,campaign.subtitle,margin,109*u,16*u,{144,161,183,255});
             int active=0;for(int i=0;i<7;++i)if(mask&(1u<<i))++active;
-            text(font,"72 BPM   /   A MINOR",w-margin-208*u,40*u,16*u,{188,207,218,255});
+            text(font,std::to_string(campaign.tempo)+" BPM   /   "+campaign.musicalKey,w-margin-208*u,40*u,16*u,{188,207,218,255});
             text(font,std::to_string(active)+" OF "+std::to_string(progress.unlocked)+" SIGNALS ACTIVE",w-margin-208*u,69*u,12*u,{113,154,166,255});
             if(!progress.complete())
-                text(font,std::to_string(TrackCount-progress.unlocked)+" STILL SEALED",w-margin-208*u,88*u,11*u,{126,110,150,255});
+                text(font,std::to_string(campaign.count()-progress.unlocked)+" STILL SEALED",w-margin-208*u,88*u,11*u,{126,110,150,255});
             for(int i=0;i<4;++i)DrawCircleV({w-margin-196*u+i*22*u,106*u},3*u,Fade({124,235,210,255},int(beat)%4==i&&mixer.playing?.95f:.18f));
             // Every track has a visible orbit, even while silent, so re-entry is discoverable.
-            for(int i=0;i<TrackCount;++i) {
+            for(int i=0;i<campaign.count();++i) {
                 float orbit=radius*(layers.orbitBase+i*layers.orbitStep);
                 Color c=Colors[i];
                 if(!progress.isUnlocked(i)) {
@@ -675,7 +753,7 @@ int main(int argc,char** argv) {
                 DrawCircleLinesV(nodes[i],(15+(hoveredNode==i?4:0))*u,Fade(c,.2f+visibility[i]*.5f));
                 centered(font,std::to_string(i+1),nodes[i].x,nodes[i].y-5*u,10*u,{235,245,255,255});
                 if(hoveredNode==i) {
-                    centered(font,Names[i],nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
+                    centered(font,trackName(i),nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
                     centered(font,(mask&(1u<<i))?"CLICK TO DESCEND":"WAKE IT FIRST",nodes[i].x,nodes[i].y+44*u,10*u,
                              Fade(c,(mask&(1u<<i))?.9f:.45f));
                 }
@@ -706,14 +784,14 @@ int main(int argc,char** argv) {
             float rulerY=cardY-39*u;
             DrawLineEx({margin,rulerY},{w-margin,rulerY},u,{38,54,69,255});
             DrawLineEx({margin,rulerY},{margin+(w-2*margin)*loopPos,rulerY},2*u,{117,193,188,255});
-            for(int i=0;i<=16;++i) {
-                float x=margin+(w-margin*2)*i/16;
+            for(int i=0;i<=campaign.bars;++i) {
+                float x=margin+(w-margin*2)*float(i)/float(campaign.bars);
                 DrawLineEx({x,rulerY-3*u},{x,rulerY+(i%4?3:6)*u},u,{69,91,103,255});
             }
-            text(font,"16-BAR ORBIT",margin,rulerY-23*u,11*u,{113,145,164,255});
-            std::string bar="BAR "+std::to_string(std::min(16,int(loopPos*16)+1))+" / 16";
+            text(font,std::to_string(campaign.bars)+"-BAR ORBIT",margin,rulerY-23*u,11*u,{113,145,164,255});
+            std::string bar="BAR "+std::to_string(std::min(campaign.bars,int(loopPos*campaign.bars)+1))+" / "+std::to_string(campaign.bars);
             text(font,bar,w-margin-89*u,rulerY-23*u,11*u,{144,178,191,255});
-            for(int i=0;i<TrackCount;++i) {
+            for(int i=0;i<campaign.count();++i) {
                 Rectangle r=cards[i];bool on=mask&(1u<<i);Color c=Colors[i];float v=visibility[i];
                 if(!progress.isUnlocked(i)) {
                     DrawRectangleRounded(r,.12f,8,{9,15,23,235});
@@ -729,9 +807,9 @@ int main(int argc,char** argv) {
                 text(font,std::to_string(i+1),r.x+14*u,r.y+12*u,12*u,Fade(c,.4f+.6f*v));
                 text(font,on?"ON":"OFF",r.x+r.width-42*u,r.y+12*u,11*u,on?c:Color{102,121,140,255});
                 float size=17*u;
-                while(MeasureTextEx(font,Names[i],size,.5f).x>r.width-26*u)size-=u;
-                text(font,Names[i],r.x+13*u,r.y+36*u,size,Fade({226,235,241,255},.4f+.6f*v));
-                text(font,layers.roles[i],r.x+13*u,r.y+62*u,9*u,Fade(c,.35f+.45f*v));
+                while(MeasureTextEx(font,trackName(i),size,.5f).x>r.width-26*u)size-=u;
+                text(font,trackName(i),r.x+13*u,r.y+36*u,size,Fade({226,235,241,255},.4f+.6f*v));
+                text(font,campaign.tracks[size_t(i)].role,r.x+13*u,r.y+62*u,9*u,Fade(c,.35f+.45f*v));
                 for(int j=0;j<80;++j) {
                     float x=r.x+13*u+j*(r.width-26*u)/80;
                     float a=(2+waves[i][j]*12)*u*(.28f+.72f*v);
@@ -767,7 +845,7 @@ int main(int argc,char** argv) {
         writeState(options,mixer,gpu,vendor,false);
         StopAudioStream(stream);UnloadAudioStream(stream);streamReady=false;
         CloseAudioDevice();audioReady=false;audioMixer=nullptr;
-        for(int i=0;i<TrackCount;++i)if(baked[i])UnloadTexture(sheets[i]);
+        for(int i=0;i<campaign.count();++i)if(baked[i])UnloadTexture(sheets[i]);
         UnloadRenderTexture(background);UnloadShader(shader);UnloadFont(font);CloseWindow();windowReady=false;
         return 0;
     } catch(const std::exception& error) {

@@ -10,7 +10,7 @@ int main() {
     using namespace orbital;
     try {
         Rgb color{175,149,246};
-        Scene a=generateScene(3,color),b=generateScene(3,color);
+        Scene a=generateScene(3,color,7),b=generateScene(3,color,7);
         require(a.towns.size()==b.towns.size()&&a.markers.size()==b.markers.size(),"a track always generates the same place");
         require(a.target==b.target,"the target is the same person every run");
         require(!a.towns.empty()&&a.towns[0].x==b.towns[0].x,"town layout is stable");
@@ -61,13 +61,13 @@ int main() {
         // Seven distinct worlds, not one world seven times. Counts all hit the
         // same caps, so compare the actual geography.
         std::map<long long,int> places;
-        for (int track=0;track<TrackCount;++track) {
-            Scene s=generateScene(track,color);
+        for (int track=0;track<7;++track) {
+            Scene s=generateScene(track,color,7);
             require(countOutfitMatches(s)==1,"every world has exactly one target");
             require(!s.towns.empty(),"every world has a town");
             ++places[(long long)(s.towns[0].x)*100000+(long long)(s.towns[0].y)];
         }
-        require(places.size()==size_t(TrackCount),"every world has its own layout");
+        require(places.size()==size_t(7),"every world has its own layout");
 
         std::cout<<"PASS: determinism, towns/roads/woods/fields, unique target outfit, all on land, distinct worlds\n";
         return 0;

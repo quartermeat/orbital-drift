@@ -26,7 +26,7 @@ make run      # fullscreen
 python3 scripts/check_controls.py     # drives real input against a live window
 python3 scripts/check_hot_reload.py   # edits assets under a live session
 python3 scripts/check_progression.py  # sigil opens the world without unsealing
-python3 scripts/preview_worlds.py     # saves a PNG of all seven world backgrounds
+python3 scripts/preview_worlds.py     # saves a PNG of every world background
 ```
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
@@ -100,6 +100,32 @@ with Orbit Hats (swung eighths) and *ends* with Nebula Pad (the harmonic bed),
 so the world gains atmosphere as it fills in, inverting the usual build. If the
 intent was to begin with the pad, the order reverses and the sigil moves to the
 innermost orbit.
+
+## Campaigns
+
+A campaign is one Bitwig project turned into a scenario: `campaigns/*.conf`
+holds the title, tempo, key, bar count, which folder the stems live in, the
+unlock direction, and every track's name, file, role and colour. A second
+project is a second config file, not a second build. `--campaign file.conf`
+picks one; the default is `campaigns/orbital-drift.conf`.
+
+`campaigns/three-signals.conf` is a deliberately different shape -- three
+tracks, unlocking left to right -- kept as living proof that the count and
+direction really are per campaign. Run it if you touch any of this.
+
+- **Nothing about a specific project may be hardcoded again.** `MaxTracks` is a
+  compile-time ceiling for array sizing only; the real count is
+  `Mixer::trackCount` / `Campaign::count()`, and the unlock direction lives in
+  `Progress::rightToLeft`. Titles, tempo, key and bar count all come from the
+  campaign and are drawn from it.
+- **`Mixer::render`'s parameter is `frameCount`, never `count`.** A member
+  called `count` shadowed it once and sent the per-track loops off the end of
+  the array.
+- The campaign is completed when every track is unlocked, which opens the
+  finale. `Esc` leaves it for the galaxy; `V` there re-opens it.
+- **The last world unlocked is deliberately kept.** Finding its target unlocks
+  nothing, but the world stays open and searchable -- it is reserved for easter
+  eggs and future campaign work, so do not skip generating it or block entry.
 
 ## Worlds
 

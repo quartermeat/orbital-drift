@@ -31,11 +31,10 @@ struct Watched {
 struct Rgb { unsigned char r, g, b; };
 
 // Every field has a working default, so a missing or broken file still runs.
+// Track names and colours belong to the campaign, not here; this is the
+// visual tuning that is worth changing while the app is open.
 struct LayerConfig {
-    std::array<Rgb, TrackCount> colors = {Rgb{175,149,246},{116,222,239},{147,180,206},
-        {113,213,179},{239,187,119},{227,143,167},{214,210,149}};
-    std::array<std::string, TrackCount> roles = {"ATMOSPHERE","MELODY","TEXTURE","LOW END","PULSE","BACKBEAT","MOVEMENT"};
-    int starCount = 260, beaconDepth = 4;
+    int starCount = 260;
     float orbitBase = .43f, orbitStep = .092f, glowScale = 1.f, energyGain = 7.f;
     std::string note;   // parse warning, empty when clean
 };
@@ -79,18 +78,10 @@ inline LayerConfig loadLayerConfig(const fs::path& path) {
         try { return std::stof(found->second); } catch (...) { ++badLines; return fallback; }
     };
     config.starCount = std::clamp(int(number("star.count", 260)), 0, 4000);
-    config.beaconDepth = std::clamp(int(number("beacon.depth", 4)), 1, 12);
     config.orbitBase = number("orbit.base", .43f);
     config.orbitStep = number("orbit.step", .092f);
     config.glowScale = number("glow.scale", 1.f);
     config.energyGain = number("energy.gain", 7.f);
-    for (int i = 0; i < TrackCount; ++i) {
-        std::string prefix = "track." + std::to_string(i + 1) + '.';
-        auto role = values.find(prefix + "role");
-        if (role != values.end() && !role->second.empty()) config.roles[i] = role->second;
-        auto color = values.find(prefix + "color");
-        if (color != values.end() && !parseRgb(color->second, config.colors[i])) ++badLines;
-    }
     if (badLines) config.note = std::to_string(badLines) + " bad line(s); those kept previous values";
     return config;
 }

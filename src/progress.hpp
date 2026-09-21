@@ -11,24 +11,33 @@ namespace orbital {
 namespace fs = std::filesystem;
 
 struct Progress {
-    int unlocked = 1;   // counted from the right: 1 means only track 7 is playable
+    int unlocked = 1;
+    int count = 1;         // how many tracks this campaign has
+    bool rightToLeft = true;   // which end opens first; the campaign decides
 
-    bool isUnlocked(int index) const { return index >= TrackCount - unlocked; }
-    // Leftmost unlocked track: the one whose layer holds the clue.
-    int frontier() const { return std::clamp(TrackCount - unlocked, 0, TrackCount - 1); }
+    bool isUnlocked(int index) const { return rightToLeft ? index >= count - unlocked : index < unlocked; }
+    // The newest unlocked track: the one whose world holds the next key.
+    int frontier() const {
+        return std::clamp(rightToLeft ? count - unlocked : unlocked - 1, 0, count - 1);
+    }
     // Next track to unlock, or -1 once every track is open.
-    int nextLocked() const { return unlocked >= TrackCount ? -1 : TrackCount - unlocked - 1; }
-    bool complete() const { return unlocked >= TrackCount; }
+    int nextLocked() const {
+        if (unlocked >= count) return -1;
+        return rightToLeft ? count - unlocked - 1 : unlocked;
+    }
+    bool complete() const { return unlocked >= count; }
     uint32_t mask() const {
         uint32_t bits = 0;
-        for (int i = 0; i < TrackCount; ++i) if (isUnlocked(i)) bits |= 1u << i;
+        for (int i = 0; i < count; ++i) if (isUnlocked(i)) bits |= 1u << i;
         return bits;
     }
-    void advance() { if (unlocked < TrackCount) ++unlocked; }
+    void advance() { if (unlocked < count) ++unlocked; }
 };
 
-inline Progress loadProgress(const fs::path& path) {
+inline Progress loadProgress(const fs::path& path, int trackCount, bool rightToLeft) {
     Progress progress;
+    progress.count = std::max(1, trackCount);
+    progress.rightToLeft = rightToLeft;
     std::ifstream file(path);
     if (!file) return progress;
     // Deliberately tiny: one integer. Anything unreadable starts over rather
@@ -38,7 +47,7 @@ inline Progress loadProgress(const fs::path& path) {
     if (at == std::string::npos) return progress;
     at = text.find(':', at);
     if (at == std::string::npos) return progress;
-    try { progress.unlocked = std::clamp(std::stoi(text.substr(at + 1)), 1, TrackCount); }
+    try { progress.unlocked = std::clamp(std::stoi(text.substr(at + 1)), 1, progress.count); }
     catch (...) { }
     return progress;
 }

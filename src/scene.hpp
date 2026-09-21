@@ -112,7 +112,7 @@ struct Scene {
     bool found = false;
 };
 
-inline Scene generateScene(int track, Rgb trackColor) {
+inline Scene generateScene(int track, Rgb trackColor, int layerCount) {
     Scene scene;
     scene.seed = uint64_t(track) * 7919u + 1013904223u;
     scene.palette = buildPalette(trackColor);
@@ -238,7 +238,7 @@ inline Scene generateScene(int track, Rgb trackColor) {
     }
     // People, one set per track. Each layer is placed the same way but from its
     // own seed, so turning a track on adds a crowd that was never there before.
-    for (int layer = 0; layer < TrackCount; ++layer) {
+    for (int layer = 0; layer < layerCount; ++layer) {
         Rng crowd(scene.seed ^ (uint64_t(layer + 1) * 0x9E3779B97F4A7C15ull));
         auto addPerson = [&](float x, float y) {
             if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
@@ -284,7 +284,7 @@ inline Scene generateScene(int track, Rgb trackColor) {
     // any layer may wear the same outfit, since every layer can become visible.
     std::vector<int> own;
     for (int i = 0; i < int(scene.people.size()); ++i)
-        if (scene.people[size_t(i)].layer == track % TrackCount) own.push_back(i);
+        if (scene.people[size_t(i)].layer == track % std::max(1, layerCount)) own.push_back(i);
     if (!own.empty()) {
         scene.target = own[size_t(rng.below(int(own.size())))];
         const Figure wanted = scene.people[size_t(scene.target)].figure;
