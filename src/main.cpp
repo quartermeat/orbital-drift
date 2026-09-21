@@ -119,7 +119,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.11.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.12.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -173,7 +173,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.11.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.12.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -322,7 +322,7 @@ int main(int argc,char** argv) {
                 double fit=std::min(w/double(SceneWidth),h/double(SceneHeight));
                 auto screenX=[&](double ix){return (ix-viewX)*viewScale+halfW;};
                 auto screenY=[&](double iy){return (iy-viewY)*viewScale+halfH;};
-                if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)&&!scene.found) {
                     Vector2 drag=GetMouseDelta();
                     viewX-=drag.x/viewScale;viewY-=drag.y/viewScale;
                 }
@@ -369,17 +369,19 @@ int main(int argc,char** argv) {
                 // their feet or shadow has to count.
                 Rectangle hitBox{float(beaconScreenX)-hitW*.5f,float(beaconScreenY)-hitH,hitW,hitH*1.18f};
                 bool overBeacon=beaconOnScreen&&CheckCollisionPointRec(pointer,hitBox);
-                if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)&&!scene.found) {
-                    if(overBeacon) {
-                        scene.found=beaconFound=true;
-                        toast="Found it";toastAt=elapsed;reloadError.clear();
-                        if(!progress.complete()&&planetTrack==progress.frontier()) {
-                            unlockedName=Names[progress.nextLocked()];
-                            progress.advance();saveProgress(options.progressFile,progress);
-                            mixer.enabled|=1u<<progress.frontier();unlockedAt=elapsed;
-                            std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<TrackCount<<')'<<std::endl;
-                        }
-                    } else {toast="Not that one";toastAt=elapsed;reloadError.clear();}
+                if(overBeacon&&!scene.found
+                   &&(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)||IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
+                    scene.found=beaconFound=true;
+                    toast="Found them";toastAt=elapsed;reloadError.clear();
+                    if(!progress.complete()&&planetTrack==progress.frontier()) {
+                        unlockedName=Names[progress.nextLocked()];
+                        progress.advance();saveProgress(options.progressFile,progress);
+                        // The new track starts playing, which lights its layer
+                        // in every world including this one.
+                        mixer.enabled|=1u<<progress.frontier();unlockedAt=elapsed;
+                        std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<TrackCount<<')'<<std::endl;
+                    }
+                    leaving=true;   // back up to the galaxy to hear what changed
                 }
                 SetMouseCursor(overBeacon?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
 
@@ -450,8 +452,12 @@ int main(int argc,char** argv) {
                     DrawPoly(at,3,marker.size*z,-90,tint(scene.palette[marker.palette]));
                     DrawPolyLines(at,3,marker.size*z,-90,tint(shade(scene.palette[marker.palette],.5f,.25f,{12,18,26}),.8f));
                 }
-                int drawnPeople=0;
+                int drawnPeople=0,layersOn=0;
+                uint32_t playing=mixer.enabled;
+                for(int i=0;i<TrackCount;++i)layersOn+=(playing>>i)&1u;
                 for(const PersonSpot& spot:scene.people) {
+                    // A layer exists only while its track does.
+                    if(!((playing>>spot.layer)&1u))continue;
                     float px=float(spot.height*viewScale);
                     if(px<1.1f)continue;
                     double sx=screenX(spot.x),sy=screenY(spot.y);
@@ -513,8 +519,8 @@ int main(int argc,char** argv) {
                 DrawRectangleLinesEx({boxX,boxY,boxW,boxH},std::max(1.f,u),Fade({214,240,232,255},.85f));
                 std::ostringstream zoomText;
                 zoomText<<"ZOOM  x"<<std::fixed<<std::setprecision(1)<<zoomLevel
-                        <<"    "<<scene.towns.size()<<" TOWNS    "<<scene.people.size()<<" PEOPLE    "
-                        <<drawnPeople<<" IN VIEW";
+                        <<"    "<<layersOn<<" OF "<<TrackCount<<" LAYERS SHOWING    "
+                        <<drawnPeople<<" PEOPLE IN VIEW";
                 text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {
                     float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);
@@ -524,8 +530,8 @@ int main(int argc,char** argv) {
                 DrawRectangle(0,int(h-46*u),int(w),int(46*u),Fade(edge,.8f));
                 centered(font,options.gallery
                          ?"1-7  SWITCH WORLD     DRAG  PAN     WHEEL / W S  ZOOM     ESC  BACK"
-                         :(options.dev?"DRAG  PAN     WHEEL / W S  ZOOM     G  JUMP TO TARGET     RIGHT-CLICK  MARK IT     ESC  BACK"
-                                      :"DRAG  PAN     WHEEL / W S  ZOOM     RIGHT-CLICK  MARK IT     ESC  BACK"),
+                         :(options.dev?"DRAG  PAN     WHEEL / W S  ZOOM     G  JUMP TO TARGET     CLICK THEM  TO CLAIM     ESC  BACK"
+                                      :"DRAG  PAN     WHEEL / W S  ZOOM     CLICK THEM  TO CLAIM     ESC  BACK"),
                          w*.5f,h-30*u,10*u,{128,158,176,255});
                 EndDrawing();
                 if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}

@@ -109,11 +109,18 @@ towns — and `bakeScene` draws it once into a 2560x1440 render texture. After
 that the view is only ever panning and zooming an image, with zoom bounded
 between fitting the frame and 9x.
 
+**Layers are the whole idea.** Every world holds one crowd per track, and a
+crowd is only drawn while its track is playing. Unlock a track and every world
+gains people it never had, including ones you already searched; the second
+world opens showing two crowds because two tracks are on. Toggling a track in
+the galaxy view cascades straight through, because the draw reads
+`mixer.enabled` rather than any copied state — keep it that way.
+
 **The hunt is for a person.** One of the world's ~500 people is the target; the
 find box renders that exact figure at the size it reaches at full zoom, so what
 you are shown is what you are looking for. They carry an invisible hit box
-(never smaller than a comfortable click) and right-clicking it unseals the next
-track. Generation guarantees nobody else wears the same outfit — shirt,
+(never smaller than a comfortable click); clicking it unseals the next track,
+starts it playing, and returns you to the galaxy view to hear what changed. Generation guarantees nobody else wears the same outfit — shirt,
 trousers, pattern, stripe and cap — or the hunt has two right answers and no
 fair one. Spire waymarks on the land are scenery only.
 
@@ -292,8 +299,11 @@ revisit when arbitrary projects load.
 - The vendored raylib headers are included with `-isystem` so their warnings
   stay out of our build. Keep our own code warning-clean under
   `-Wall -Wextra -Wpedantic`.
-- Per the home guide: **Python** for one-off setup scripts, **Go** for anything
-  long-lived. Game code is C++ because raylib is.
+- Per the home guide: **Python** for one-off scripts, **Go** for anything
+  long-lived. Game code is C++ because raylib is. **Frequent reuse is itself
+  the trigger to switch**: a script written as a throwaway that now runs on
+  every change has stopped being a throwaway. The `scripts/check_*.py`
+  harnesses are past that line and should be ported to Go.
 - Generated output (`build/`, `artifacts/`, `assets/audio/`, `assets/font.ttf`)
   is gitignored. Don't commit stems.
 

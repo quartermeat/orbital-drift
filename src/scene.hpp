@@ -91,9 +91,12 @@ struct Patch { std::vector<Blob> blobs; };
 struct Field { float x, y, w, h, spin; unsigned char tone; int furrows; };
 struct Road { std::vector<std::pair<float, float>> points; };
 struct Marker { float x, y, size; unsigned char palette; };   // scenery: waymarks on the land
-// People are placed here but drawn live rather than baked into the texture, so
-// they stay sharp as you zoom instead of turning into magnified texels.
-struct PersonSpot { float x, y, height; Figure figure; };
+// Every person belongs to a track's layer, and a layer is only drawn while its
+// track is playing. A world visibly fills up as the mix does, so a world you
+// already searched has people in it you have never seen.
+//
+// Drawn live rather than baked, so they stay sharp as you zoom.
+struct PersonSpot { float x, y, height; unsigned char layer; Figure figure; };
 
 struct Scene {
     uint64_t seed = 0;
@@ -105,7 +108,7 @@ struct Scene {
     std::vector<Road> roads;
     std::vector<Marker> markers;
     std::vector<PersonSpot> people;
-    int target = -1;   // the person the find box shows
+    int target = -1;   // the person the find box shows; always in this world's own layer
     bool found = false;
 };
 
@@ -233,51 +236,58 @@ inline Scene generateScene(int track, Rgb trackColor) {
         scene.markers.push_back({x, y, rng.range(15.f, 23.f),
                                  static_cast<unsigned char>(rng.below(PaletteSize))});
     }
-    // People: crowded in the towns, strung along the roads, scattered over the
-    // fields and the shoreline. At a person's real size they are specks until
-    // you zoom, which is what makes zooming worth doing.
-    auto addPerson = [&](float x, float y) {
-        if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
-        scene.people.push_back({x, y, rng.range(11.f, 16.f), rollFigure(rng)});
-    };
-    for (const Town& town : scene.towns) {
-        int count = 26 + rng.below(38);
-        for (int i = 0; i < count; ++i) {
-            float angle = rng.range(0, 6.2831853f), reach = town.radius * 1.15f * std::sqrt(rng.unit());
-            addPerson(town.x + std::cos(angle) * reach, town.y + std::sin(angle) * reach);
+    // People, one set per track. Each layer is placed the same way but from its
+    // own seed, so turning a track on adds a crowd that was never there before.
+    for (int layer = 0; layer < TrackCount; ++layer) {
+        Rng crowd(scene.seed ^ (uint64_t(layer + 1) * 0x9E3779B97F4A7C15ull));
+        auto addPerson = [&](float x, float y) {
+            if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
+            scene.people.push_back({x, y, crowd.range(11.f, 16.f),
+                                    static_cast<unsigned char>(layer), rollFigure(crowd)});
+        };
+        for (const Town& town : scene.towns) {
+            int count = 7 + crowd.below(11);
+            for (int i = 0; i < count; ++i) {
+                float angle = crowd.range(0, 6.2831853f), reach = town.radius * 1.15f * std::sqrt(crowd.unit());
+                addPerson(town.x + std::cos(angle) * reach, town.y + std::sin(angle) * reach);
+            }
+        }
+        for (const Road& road : scene.roads) {
+            int count = 2 + crowd.below(4);
+            for (int i = 0; i < count; ++i) {
+                float t = crowd.unit() * float(road.points.size() - 1);
+                size_t at = size_t(t);
+                float f = t - float(at);
+                const auto& a = road.points[at];
+                const auto& b = road.points[std::min(at + 1, road.points.size() - 1)];
+                addPerson(a.first + (b.first - a.first) * f + crowd.range(-16.f, 16.f),
+                          a.second + (b.second - a.second) * f + crowd.range(-16.f, 16.f));
+            }
+        }
+        for (const Field& field : scene.fields)
+            if (crowd.unit() < .45f)
+                addPerson(field.x + crowd.range(-.45f, .45f) * field.w,
+                          field.y + crowd.range(-.45f, .45f) * field.h);
+        for (int i = 0; i < 90; ++i) {
+            float x = crowd.range(0, float(SceneWidth)), y = crowd.range(0, float(SceneHeight));
+            float height = elevationAt(scene.seed, x, y);
+            if (height > ShoreLevel - .03f && height < ShoreLevel + .05f) addPerson(x, y);
         }
     }
-    for (const Road& road : scene.roads) {
-        int count = 5 + rng.below(13);
-        for (int i = 0; i < count; ++i) {
-            float t = rng.unit() * float(road.points.size() - 1);
-            size_t at = size_t(t);
-            float f = t - float(at);
-            const auto& a = road.points[at];
-            const auto& b = road.points[std::min(at + 1, road.points.size() - 1)];
-            addPerson(a.first + (b.first - a.first) * f + rng.range(-16.f, 16.f),
-                      a.second + (b.second - a.second) * f + rng.range(-16.f, 16.f));
-        }
-    }
-    for (const Field& field : scene.fields) {
-        int count = rng.below(4);
-        for (int i = 0; i < count; ++i)
-            addPerson(field.x + rng.range(-.45f, .45f) * field.w, field.y + rng.range(-.45f, .45f) * field.h);
-    }
-    for (int i = 0; i < 260; ++i) {
-        float x = rng.range(0, float(SceneWidth)), y = rng.range(0, float(SceneHeight));
-        float height = elevationAt(scene.seed, x, y);
-        if (height > ShoreLevel - .03f && height < ShoreLevel + .05f) addPerson(x, y);   // the shoreline
-    }
-    // Painter's order: someone lower on the map stands in front.
+    // Painter's order across every layer at once, so switching a layer on drops
+    // its people into the right depth rather than on top of everything.
     std::sort(scene.people.begin(), scene.people.end(),
               [](const PersonSpot& a, const PersonSpot& b) { return a.y < b.y; });
 
-    // One of them is the target the find box shows. Nobody else may wear the
-    // same outfit, or the hunt has two right answers and no fair one.
-    if (!scene.people.empty()) {
-        scene.target = rng.below(int(scene.people.size()));
-        const Figure& wanted = scene.people[size_t(scene.target)].figure;
+    // The target lives in this world's own layer, which is always showing while
+    // you are here -- a world whose track is silent cannot be reached. Nobody in
+    // any layer may wear the same outfit, since every layer can become visible.
+    std::vector<int> own;
+    for (int i = 0; i < int(scene.people.size()); ++i)
+        if (scene.people[size_t(i)].layer == track % TrackCount) own.push_back(i);
+    if (!own.empty()) {
+        scene.target = own[size_t(rng.below(int(own.size())))];
+        const Figure wanted = scene.people[size_t(scene.target)].figure;
         for (int i = 0; i < int(scene.people.size()); ++i) {
             if (i == scene.target) continue;
             Figure& other = scene.people[size_t(i)].figure;
