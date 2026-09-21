@@ -355,10 +355,16 @@ revisit when arbitrary projects load.
 - Generated output (`build/`, `artifacts/`, `assets/audio/`, `assets/font.ttf`)
   is gitignored. Don't commit stems.
 
-## Versioning
+## Versioning and pushing
 
 Home guide rule applies: every commit advances `MAJOR.MINOR.PATCH` in `VERSION`,
 the subject is prefixed `vX.Y.Z: `, and an annotated tag `vX.Y.Z` points at it.
+
+**Run `make ci` before every push.** Not the individual checks — the whole
+pipeline, so everything is verified against the same build. It takes about 70
+seconds. If it fails, fix it before pushing rather than pushing and mentioning
+the failure. The first time it ran it found a segfault that none of the
+individual checks covered, which is the entire argument for this rule.
 
 **This is not a git repository yet.** `VERSION` says `0.1.0`. Initialising it is
 a user decision — ask before running `git init`, and don't push without explicit
