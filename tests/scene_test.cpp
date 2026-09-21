@@ -33,14 +33,44 @@ int main() {
         std::vector<int> members(a.skits.size(),0);
         for (const PersonSpot& spot:a.people) {
             require(spot.skit>=0&&spot.skit<int(a.skits.size()),"every person belongs to a real skit");
-            require(a.skits[size_t(spot.skit)].layer==spot.layer,"a person's skit is in their own layer");
+            require(a.skits[size_t(spot.skit)].primary==spot.layer,"a person's skit is in their own layer");
             ++members[size_t(spot.skit)];
         }
         for (size_t i=0;i<a.skits.size();++i) {
             require(members[i]>0,"no skit is empty");
             require(members[i]==a.skits[i].members,"a skit's member count matches its people");
-            require(a.skits[i].layer<TrackLayers,"a skit names a real track layer");
+            require(a.skits[i].primary<TrackLayers,"a skit names a real track layer");
+            require(a.skits[i].wants!=0,"a skit asks for at least one track");
+            require((a.skits[i].wants&a.skits[i].hides)==0,"a skit never wants and hides the same track");
+            require((a.skits[i].wants>>a.skits[i].primary)&1u,"a skit always wants its own primary track");
         }
+        // Configurations: most skits want one track, some want two, a few need
+        // something silent. Without the spread there are no specific configs.
+        int single=0,paired=0,needsQuiet=0;
+        for (const Skit& skit:a.skits) {
+            int bits=0;
+            for (int i=0;i<TrackLayers;++i) bits+=(skit.wants>>i)&1u;
+            if (bits==1) ++single; else ++paired;
+            if (skit.hides) ++needsQuiet;
+        }
+        require(single>a.skits.size()/2,"most skits still want a single track");
+        require(paired>20,"some skits want a pair of tracks");
+        require(needsQuiet>5,"some skits only appear with a track muted");
+
+        // Everything shows when everything plays, except what needs silence.
+        uint32_t all=(1u<<TrackLayers)-1;
+        int showingAll=0;
+        for (const Skit& skit:a.skits) if (skit.showing(all)) ++showingAll;
+        require(showingAll==int(a.skits.size())-needsQuiet,"a full mix shows everything that does not need silence");
+
+        // The target must be reachable by waking its own world's track alone.
+        {
+            const Skit& hosting=a.skits[size_t(a.people[size_t(a.target)].skit)];
+            require(hosting.hides==0,"the target's skit never needs a track muted");
+            uint32_t onlyOwn=1u<<a.people[size_t(a.target)].layer;
+            require(hosting.showing(onlyOwn),"the target shows with only its own track playing");
+        }
+
         // A skit belongs to exactly one track layer, so toggling a track adds
         // or removes whole vignettes rather than half a queue.
         std::map<int,int> layerOf;

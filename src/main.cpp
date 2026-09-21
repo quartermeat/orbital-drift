@@ -36,6 +36,7 @@ static int planetTrack=-1;
 static bool beaconOnScreen=false,beaconFound=false;
 static float beaconX=0,beaconY=0;
 static double zoomLevel=1,viewCenterX=0,viewCenterY=0,beaconWorldX=0,beaconWorldY=0;
+static int skitsShowing=0,skitsTotal=0;
 
 // Only the terrain is baked, and per pixel rather than in cells so it stays
 // soft when magnified. Everything with a hard edge -- buildings, trees, fields,
@@ -133,7 +134,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.17.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.18.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -152,7 +153,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
        <<"},\"planet\":{\"view\":"<<quote(view==View::Planet?"planet":(view==View::Finale?"finale":"system"))
        <<",\"track\":"<<(planetTrack>=0?quote(trackName(planetTrack)):std::string("null"))
        <<",\"beacon_on_screen\":"<<(beaconOnScreen?"true":"false")<<",\"beacon_found\":"<<(beaconFound?"true":"false")
-       <<",\"beacon_x\":"<<int(beaconX)<<",\"beacon_y\":"<<int(beaconY)<<",\"zoom\":"<<zoomLevel
+       <<",\"beacon_x\":"<<int(beaconX)<<",\"beacon_y\":"<<int(beaconY)<<",\"zoom\":"<<zoomLevel<<",\"skits_showing\":"<<skitsShowing<<",\"skits_total\":"<<skitsTotal
        <<",\"view_x\":"<<viewCenterX<<",\"view_y\":"<<viewCenterY
        <<",\"beacon_world_x\":"<<beaconWorldX<<",\"beacon_world_y\":"<<beaconWorldY<<",\"complete\":"<<(progress.complete()?"true":"false")<<"}"
        <<",\"tracks\":[";
@@ -189,7 +190,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.17.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.18.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -296,6 +297,7 @@ int main(int argc,char** argv) {
         // The view into a world: where we are looking, and how many pixels one
         // canvas unit covers. Doubles, because deep zoom runs out of float fast.
         double viewX=.5,viewY=.5,viewScale=1;
+        std::vector<bool> showing;   // which skits this mix brings out
         double enteredAt=-9;
         float sigilPulse=0;
         if(options.gallery||options.world>=0) {
@@ -443,11 +445,17 @@ int main(int argc,char** argv) {
                 zoomLevel=viewScale/fit;viewCenterX=viewX;viewCenterY=viewY;
 
                 uint32_t playing=mixer.enabled;
+                // Which vignettes this mix brings out. Resolved once per frame
+                // rather than per person: a world has hundreds of each.
+                showing.assign(scene.skits.size(),false);
+                skitsShowing=0;skitsTotal=int(scene.skits.size());
+                for(size_t i=0;i<scene.skits.size();++i)
+                    if(scene.skits[i].showing(playing)) {showing[i]=true;++skitsShowing;}
                 const PersonSpot& target=scene.people[size_t(scene.target)];
                 beaconWorldX=target.x;beaconWorldY=target.y;
                 double beaconScreenX=screenX(target.x),beaconScreenY=screenY(target.y);
                 double beaconPixels=target.height*viewScale;
-                bool targetShowing=((playing>>target.layer)&1u)!=0;
+                bool targetShowing=showing[size_t(target.skit)];
                 beaconOnScreen=targetShowing&&beaconScreenX>0&&beaconScreenY>0&&beaconScreenX<w&&beaconScreenY<h;
                 beaconX=float(beaconScreenX);beaconY=float(beaconScreenY);beaconFound=scene.found;
                 // An invisible box around the target, drawn feet-up and never
@@ -549,10 +557,10 @@ int main(int argc,char** argv) {
                     DrawPolyLines(at,3,marker.size*z,-90,tint(shade(scene.palette[marker.palette],.5f,.25f,{12,18,26}),.8f));
                 }
                 int drawnPeople=0,layersOn=0;
-                for(int i=0;i<campaign.count();++i)layersOn+=(playing>>i)&1u;
+                for(int i=0;i<campaign.count();++i)layersOn+=(mixer.enabled>>i)&1u;
                 for(const PersonSpot& spot:scene.people) {
-                    // A layer exists only while its track does.
-                    if(!((playing>>spot.layer)&1u))continue;
+                    // A vignette exists only while its configuration is met.
+                    if(!showing[size_t(spot.skit)])continue;
                     float px=float(spot.height*viewScale);
                     if(px<1.1f)continue;
                     double sx=screenX(spot.x),sy=screenY(spot.y);
@@ -640,8 +648,9 @@ int main(int argc,char** argv) {
                 DrawRectangleLinesEx({boxX,boxY,boxW,boxH},std::max(1.f,u),Fade({214,240,232,255},.85f));
                 std::ostringstream zoomText;
                 zoomText<<"ZOOM  x"<<std::fixed<<std::setprecision(1)<<zoomLevel
-                        <<"    "<<layersOn<<" OF "<<campaign.count()<<" LAYERS SHOWING    "
-                        <<drawnPeople<<" PEOPLE IN VIEW";
+                        <<"    "<<layersOn<<"/"<<campaign.count()<<" TRACKS    "
+                        <<skitsShowing<<"/"<<scene.skits.size()<<" SKITS    "
+                        <<drawnPeople<<" IN VIEW";
                 if(options.dev)zoomText<<"    BOXES = LAYER COLOUR";
                 text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {

@@ -102,6 +102,13 @@ struct PersonSpot { float x, y, height; unsigned char layer; int skit; Figure fi
 // Nobody is scattered on their own account -- every person belongs to one,
 // even a lone wanderer, which is a Stroll of one. Crowds made of arrangements
 // read as a place; crowds made of random dots read as noise.
+//
+// A skit is not tied to one track but to a *configuration* of them: a set that
+// must be sounding and a set that must be silent. Most want a single track and
+// behave like a layer. Some want a pair, and appear only once both are up.
+// A few want something off as well, so they can only be found by muting
+// something -- content that a finished campaign still has to be mixed into
+// existence.
 enum class SkitKind : unsigned char { Queue, Ring, Chase, Pair, Audience, Picnic, Work, Stroll };
 inline constexpr int SkitKindCount = 8;
 inline const char* skitName(SkitKind kind) {
@@ -116,7 +123,15 @@ inline const char* skitName(SkitKind kind) {
         default: return "stroll";
     }
 }
-struct Skit { SkitKind kind; float x, y; unsigned char layer; int members; };
+struct Skit {
+    SkitKind kind;
+    float x, y;
+    uint32_t wants = 0;    // every one of these tracks must be sounding
+    uint32_t hides = 0;    // none of these may be
+    unsigned char primary; // the track it belongs to first, used for colour
+    int members;
+    bool showing(uint32_t playing) const { return (playing & wants) == wants && (playing & hides) == 0; }
+};
 
 struct Scene {
     uint64_t seed = 0;
@@ -309,6 +324,26 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
 
             int skitIndex = int(scene.skits.size());
             int placed = 0;
+
+            // The configuration this skit needs. Most are a single track, so a
+            // world still fills in as the mix does. A quarter want a second
+            // track as well, and a few want one silent, which is the only way
+            // to reach them.
+            uint32_t wants = 1u << layer, hides = 0;
+            if (layerCount > 1) {
+                float roll = crowd.unit();
+                if (roll > .68f) {
+                    int partner = crowd.below(layerCount - 1);
+                    if (partner >= layer) ++partner;
+                    wants |= 1u << partner;
+                }
+                if (roll > .90f) {
+                    for (int attempt = 0; attempt < 8; ++attempt) {
+                        int quiet = crowd.below(layerCount);
+                        if (!((wants >> quiet) & 1u)) { hides = 1u << quiet; break; }
+                    }
+                }
+            }
             float facing = crowd.range(0, 6.2831853f);
             auto put = [&](float x, float y, unsigned char pose) {
                 if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
@@ -392,8 +427,9 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
                     break;
                 }
             }
-            if (placed > 0) scene.skits.push_back({kind, anchor.x, anchor.y,
-                                                   static_cast<unsigned char>(layer), placed});
+            if (placed > 0)
+                scene.skits.push_back({kind, anchor.x, anchor.y, wants, hides,
+                                       static_cast<unsigned char>(layer), placed});
         }
     }
 
@@ -410,6 +446,11 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
         if (scene.people[size_t(i)].layer == track % std::max(1, layerCount)) own.push_back(i);
     if (!own.empty()) {
         scene.target = own[size_t(rng.below(int(own.size())))];
+        // The target's own skit must ask for nothing but this world's track,
+        // or the hunt could need a mix the player has no way to guess.
+        Skit& hosting = scene.skits[size_t(scene.people[size_t(scene.target)].skit)];
+        hosting.wants = 1u << (track % std::max(1, layerCount));
+        hosting.hides = 0;
         // Nobody may stand in front of the target. People are drawn in order of
         // y, so someone slightly below them covers them completely -- clicking
         // still works, but the hunt is unwinnable because they cannot be seen.

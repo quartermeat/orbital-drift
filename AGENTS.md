@@ -159,9 +159,19 @@ gang, or a stroll. A lone wanderer is a Stroll of one, so the rule has no
 exceptions: a figure is never placed on its own account. Crowds made of
 arrangements read as a place; crowds made of random dots read as noise.
 
-- **A skit belongs to exactly one track layer**, so toggling a track adds or
-  removes whole vignettes rather than half a queue. Asserted in
-  `tests/scene_test.cpp`, both per person and per skit.
+- **A skit is tied to a configuration of tracks, not to one track**: `wants`
+  must all be sounding and `hides` must all be silent. Most skits want a single
+  track and behave like a layer, so a world still fills in as the mix does.
+  About a quarter want a pair and only appear once both are up. A few want
+  something *silent*, so they can only be reached by muting — content a
+  finished campaign still has to be mixed into existence.
+- **The target's own skit always wants exactly its world's track and hides
+  nothing.** Otherwise the hunt could need a mix the player has no way to
+  guess. Asserted.
+- Visibility is resolved once per frame into a `showing` vector, not per
+  person: a world has hundreds of skits and over a thousand people.
+- A whole skit appears or disappears together, never half a queue. Asserted
+  per person and per skit.
 - The skit decides its members' poses; `rollFigure`'s random pose is
   overwritten. That is what makes a queue look like a queue.
 - Which skits happen where depends on the anchor: queues and audiences in

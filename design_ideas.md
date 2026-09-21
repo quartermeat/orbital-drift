@@ -62,6 +62,18 @@ search grows with the mix:
 The run gets harder because the music gets fuller. That is the thesis paying
 off without being designed twice.
 
+### Configurations, not just layers
+
+A skit is tied to a set of tracks that must be sounding and a set that must be
+silent. Most want one track, so the campaign still grows steadily — about 150
+people at one track, 1180 at seven. Around a quarter want a pair and arrive
+only when both are up. Forty or so per world want something *muted*, and those
+are the ones a finished campaign is for: with everything playing you are still
+missing content, and the only way to it is to take something away.
+
+That closes the loop on the thesis from the other end. The mix has always
+built the world; now it can also withhold part of it.
+
 ### The last world
 
 For a seven-track campaign the sixth find completes the run, so the last track's
