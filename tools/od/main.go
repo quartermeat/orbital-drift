@@ -1,0 +1,60 @@
+package main
+
+// od: the project's tool. `od ci` is the one command to run; the rest exist so
+// the pipeline has something to call.
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+func usage() {
+	fmt.Println(`od - Orbital Drift tooling
+
+  od ci [pipeline.yaml]   run the whole pipeline (this is the one to run)
+  od check <name>         one live check: controls | hot-reload | progression | find
+  od campaigns            parse every campaigns/*.conf and report
+  od worlds               save a PNG of every world background`)
+}
+
+func main() {
+	root := repoRoot()
+	if len(os.Args) < 2 {
+		usage()
+		os.Exit(2)
+	}
+	switch os.Args[1] {
+	case "ci":
+		path := filepath.Join(root, "ci", "pipeline.yaml")
+		if len(os.Args) > 2 {
+			path = os.Args[2]
+		}
+		os.Exit(runPipeline(root, path))
+	case "check":
+		if len(os.Args) < 3 {
+			usage()
+			os.Exit(2)
+		}
+		switch os.Args[2] {
+		case "controls":
+			os.Exit(checkControls(root))
+		case "hot-reload":
+			os.Exit(checkHotReload(root))
+		case "progression":
+			os.Exit(checkProgression(root))
+		case "find":
+			os.Exit(checkFind(root))
+		default:
+			fmt.Fprintf(os.Stderr, "unknown check %q\n", os.Args[2])
+			os.Exit(2)
+		}
+	case "campaigns":
+		os.Exit(checkCampaigns(root))
+	case "worlds":
+		os.Exit(previewWorlds(root))
+	default:
+		usage()
+		os.Exit(2)
+	}
+}

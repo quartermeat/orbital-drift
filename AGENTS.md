@@ -17,17 +17,22 @@ open questions. It is design rationale, not spec; this file holds the rules.
 ## Commands
 
 ```
-make setup    # fetch raylib 5.5 (checksum-pinned) + stems + font
+make ci       # THE ONE TO RUN: build, unit, assets, campaigns, every live check
 make          # build build/orbital-drift
-make test     # mixer + config unit tests, no audio device needed
-make check    # test + --check-assets
-make run      # fullscreen
-
-python3 scripts/check_controls.py     # drives real input against a live window
-python3 scripts/check_hot_reload.py   # edits assets under a live session
-python3 scripts/check_progression.py  # sigil opens the world without unsealing
-python3 scripts/preview_worlds.py     # saves a PNG of every world background
+make test     # unit tests only, no window or audio device needed
+make figures  # regenerate artifacts/figures.png
+make worlds   # save a PNG of every world background
+make setup    # fetch raylib 5.5 (checksum-pinned) + stems + font
 ```
+
+**Run `make ci`, not the individual checks.** It is the higher-level entry
+point and it verifies everything against the same build; running one check by
+hand proves only that one thing still works. It takes about 70 seconds.
+`ci/pipeline.yaml` defines the stages, so adding a check means adding a step
+there rather than remembering a new command.
+
+Individual pieces, when you are iterating on one: `tools/od/od check controls |
+hot-reload | progression | find`, `tools/od/od campaigns`, `tools/od/od worlds`.
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
 `--capture-after N`, `--state f.json`, `--assets DIR`, `--check-assets`, `--resume`.
@@ -335,8 +340,18 @@ revisit when arbitrary projects load.
 - Per the home guide: **Python** for one-off scripts, **Go** for anything
   long-lived. Game code is C++ because raylib is. **Frequent reuse is itself
   the trigger to switch**: a script written as a throwaway that now runs on
-  every change has stopped being a throwaway. The `scripts/check_*.py`
-  harnesses are past that line and should be ported to Go.
+  every change has stopped being a throwaway. The check harnesses crossed that
+  line and are now Go, in `tools/od`. Python is fine to start a script in;
+  port it once it is being run rather than written. `scripts/setup.py` stays
+  Python because fetching dependencies really is a one-off.
+- **Live checks never run in parallel.** Two windows named "Orbital Drift"
+  fight over focus and xdotool sends input to the wrong one. Unit and asset
+  stages are parallel because they are headless.
+- **Park the pointer before sending keys.** `xdotool --clearmodifiers` can
+  restore a held button as a synthesized click, so a pointer left over an orbit
+  node turns the next keystroke into a descent. `Launch` parks it.
+- **`Process.Signal(nil)` reports every live process as dead.** Use
+  `syscall.Signal(0)`; the nil version made a healthy app look like a crash.
 - Generated output (`build/`, `artifacts/`, `assets/audio/`, `assets/font.ttf`)
   is gitignored. Don't commit stems.
 

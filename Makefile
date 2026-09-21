@@ -3,7 +3,7 @@ RAYLIB := build/deps/raylib-5.5/src
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
 LDLIBS := $(RAYLIB)/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
 
-.PHONY: all setup run test check clean figures
+.PHONY: all setup run test check clean figures ci od worlds
 all: build/orbital-drift
 setup:
 	python3 scripts/setup.py
@@ -34,6 +34,15 @@ test: build/mixer-test build/config-test build/progress-test build/scene-test bu
 	./build/progress-test
 	./build/scene-test
 	./build/campaign-test
+tools/od/od: tools/od/*.go tools/od/go.mod
+	cd tools/od && go build -o od .
+od: tools/od/od
+# The one command to run: builds, unit tests, asset and campaign checks, then
+# every live check. Prefer this over running the individual checks by hand.
+ci: tools/od/od
+	tools/od/od ci
+worlds: all tools/od/od
+	tools/od/od worlds
 check: test all
 	./build/orbital-drift --check-assets
 run: all

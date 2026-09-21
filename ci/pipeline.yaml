@@ -1,0 +1,52 @@
+# One pipeline, run with `make ci` (or `tools/od/od ci`).
+#
+# This is the higher-level entry point: run this rather than the individual
+# checks, so everything is verified against the same build.
+#
+# Stages run in order and stop on the first failure. Steps inside a stage run
+# in parallel when `parallel: true`, which is safe for anything headless.
+# Anything that opens a window must stay serial: two windows named
+# "Orbital Drift" fight over focus and xdotool sends input to the wrong one.
+
+name: orbital-drift
+
+stages:
+  - name: build
+    steps:
+      - name: compile
+        run: make -j4
+
+  - name: unit
+    parallel: true          # no window, no audio device, no shared state
+    steps:
+      - name: mixer
+        run: build/mixer-test
+      - name: config
+        run: build/config-test
+      - name: progress
+        run: build/progress-test
+      - name: scene
+        run: build/scene-test
+      - name: campaign
+        run: build/campaign-test
+
+  - name: assets
+    parallel: true
+    steps:
+      - name: stems
+        run: build/orbital-drift --check-assets
+      - name: campaigns-load
+        run: tools/od/od campaigns
+
+  - name: live
+    parallel: false         # every one of these opens a window
+    timeout: 240
+    steps:
+      - name: controls
+        run: tools/od/od check controls
+      - name: hot-reload
+        run: tools/od/od check hot-reload
+      - name: progression
+        run: tools/od/od check progression
+      - name: find
+        run: tools/od/od check find
