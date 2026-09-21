@@ -26,6 +26,13 @@ make worlds   # save a PNG of every world background
 make setup    # fetch raylib 5.5 (checksum-pinned) + stems + font
 ```
 
+Public homepage: `https://quartermeat.github.io/orbital-drift/`, maintained in
+`../quartermeat.github.io/orbital-drift/`. Releases include a Linux x86-64 binary
+bundle and a complete source bundle with music, font, and pinned raylib archive.
+After validation and a versioned commit, `go run tools/release/main.go` creates
+both archives and checksums in `build/releases/vVERSION/`. Setup accepts and
+verifies bundled stems without requiring this workstation's Music directory.
+
 **Run `make ci`, not the individual checks.** It is the higher-level entry
 point and it verifies everything against the same build; running one check by
 hand proves only that one thing still works. It takes about 70 seconds.

@@ -1,4 +1,4 @@
-"""Fetch local build dependencies and original stems: python3 scripts/setup.py."""
+"""Prepare bundled assets and pinned build dependencies: python3 scripts/setup.py."""
 from pathlib import Path
 import hashlib
 import json
@@ -30,23 +30,29 @@ def main():
     audio = ROOT / 'assets' / 'audio'
     audio.mkdir(parents=True, exist_ok=True)
     source = Path.home() / 'Music' / 'Orbital Drift' / 'audio'
-    manifest = []
-    for file in sorted(source.glob('*.wav')):
-        target = audio / file.name
-        if not target.exists():
-            shutil.copyfile(file, target)
-        if hashlib.sha256(file.read_bytes()).digest() != hashlib.sha256(target.read_bytes()).digest():
-            raise RuntimeError(f'Existing asset differs; preserved: {target}')
-        manifest.append({'file':file.name,'sha256':hashlib.sha256(target.read_bytes()).hexdigest()})
+    manifest = json.loads((ROOT / 'assets' / 'manifest.json').read_text())
     if len(manifest) != 7:
-        raise RuntimeError('Expected all seven original Orbital Drift stems')
+        raise RuntimeError('Expected seven entries in the asset manifest')
+    for entry in manifest:
+        name = entry['file']
+        if Path(name).name != name:
+            raise RuntimeError('Invalid asset filename in manifest')
+        target = audio / name
+        if not target.exists():
+            file = source / name
+            if not file.exists():
+                raise RuntimeError(
+                    f'Missing {name}. Download the full source bundle (includes music) from '
+                    'https://github.com/quartermeat/orbital-drift/releases')
+            shutil.copyfile(file, target)
+        if hashlib.sha256(target.read_bytes()).hexdigest() != entry['sha256']:
+            raise RuntimeError(f'Existing asset differs; preserved: {target}')
     font = ROOT / 'assets' / 'font.ttf'
     if not font.exists():
         shutil.copyfile('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',font)
     license_file = ROOT / 'assets' / 'FONT-LICENSE.txt'
     if not license_file.exists():
         shutil.copyfile('/usr/share/doc/fonts-dejavu-core/copyright',license_file)
-    (ROOT / 'assets' / 'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print('Seven original tracks and font ready.', flush=True)
 
 
