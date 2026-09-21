@@ -139,6 +139,11 @@ Rules:
 - **Generation is deterministic and raylib-free.** `scene.hpp` uses its own
   PRNG, so a world is identical every run and on every machine, and the layout
   is unit-testable without a window.
+- `--dev` adds `G`, which jumps the view onto the target at full zoom and
+  outlines its hit box in red. It is the only cheat; keep it behind the flag.
+- **The hit box extends past the feet.** A person's ground point is where the
+  eye says they are, so clicking their feet or shadow has to count; a box that
+  stops at the feet misses the most natural click by a pixel.
 - `--gallery` opens straight into a world with 1-7 switching between them, and
   `--world N` opens one directly. `scripts/preview_worlds.py` saves a PNG of
   each.

@@ -91,7 +91,7 @@ struct Options {
     fs::path state=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"state.json";
     fs::path capture;
     fs::path progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"progress.json";
-    bool windowed=false,check=false,resume=false,gallery=false;
+    bool windowed=false,check=false,resume=false,gallery=false,dev=false;
     int world=-1;
     double captureAfter=2;
     double seconds=0;
@@ -119,7 +119,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.10.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.11.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -165,6 +165,7 @@ int main(int argc,char** argv) {
             else if(arg=="--check-assets")options.check=true;
             else if(arg=="--resume")options.resume=true;
             else if(arg=="--gallery")options.gallery=true;
+            else if(arg=="--dev")options.dev=true;
             else if(arg=="--world")options.world=std::stoi(value());
             else if(arg=="--capture-after")options.captureAfter=std::stod(value());
             else if(arg=="--assets")options.assets=fs::absolute(value());
@@ -172,8 +173,8 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.10.0\nDefault: fullscreen, silent, one track unsealed.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
-                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --world N --capture-after SECONDS\n";return 0;
+                std::cout<<"Orbital Drift 0.11.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
         mixer.load(options.assets/"audio");
@@ -345,6 +346,13 @@ int main(int argc,char** argv) {
                 double marginY=std::max(0.0,(h/viewScale)*.5-SceneHeight*.5);
                 viewX=std::clamp(viewX,-marginX,SceneWidth+marginX);
                 viewY=std::clamp(viewY,-marginY,SceneHeight+marginY);
+                if(options.dev&&IsKeyPressed(KEY_G)) {
+                    viewX=scene.people[size_t(scene.target)].x;
+                    viewY=scene.people[size_t(scene.target)].y-scene.people[size_t(scene.target)].height*.5;
+                    viewScale=fit*9.0;
+                    toast="dev: jumped to the target";toastAt=elapsed;reloadError.clear();
+                    std::cout<<"[dev] jumped to target"<<std::endl;
+                }
                 zoomLevel=viewScale/fit;viewCenterX=viewX;viewCenterY=viewY;
 
                 const PersonSpot& target=scene.people[size_t(scene.target)];
@@ -356,7 +364,10 @@ int main(int argc,char** argv) {
                 // An invisible box around the target, drawn feet-up and never
                 // smaller than a comfortable click.
                 float hitW=std::max(18.f,float(beaconPixels)*.62f),hitH=std::max(20.f,float(beaconPixels));
-                Rectangle hitBox{float(beaconScreenX)-hitW*.5f,float(beaconScreenY)-hitH,hitW,hitH};
+                // The box runs from the head down past the feet: a person's
+                // ground point is where the eye says they are, so clicking
+                // their feet or shadow has to count.
+                Rectangle hitBox{float(beaconScreenX)-hitW*.5f,float(beaconScreenY)-hitH,hitW,hitH*1.18f};
                 bool overBeacon=beaconOnScreen&&CheckCollisionPointRec(pointer,hitBox);
                 if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)&&!scene.found) {
                     if(overBeacon) {
@@ -465,8 +476,13 @@ int main(int argc,char** argv) {
                     DrawCircleLinesV({float(beaconScreenX),float(beaconScreenY)},
                                      float(std::max(16.0,beaconPixels*1.6)),Fade(want,.55f));
                 }
+                if(options.dev&&!scene.found&&beaconOnScreen) {
+                    DrawRectangleLinesEx(hitBox,std::max(1.f,u),Fade(Color{255,120,120,255},.75f));
+                    centered(font,"TARGET",hitBox.x+hitBox.width*.5f,hitBox.y-13*u,10*u,{255,150,150,255});
+                }
                 DrawRectangleRounded({pad-16*u,pad-24*u,470*u,98*u},.08f,8,Fade(edge,.94f));
-                text(font,options.gallery?"GALLERY":"WORLD",pad,pad-10*u,12*u,{118,150,172,255});
+                text(font,options.gallery?"GALLERY":(options.dev?"WORLD  /  DEV":"WORLD"),pad,pad-10*u,12*u,
+                     options.dev?Color{226,142,142,255}:Color{118,150,172,255});
                 text(font,Names[planetTrack],pad,pad+8*u,34*u,{231,238,244,255});
                 text(font,scene.found?"This world has given up its secret"
                                      :(options.gallery?"1-7 switch worlds. Drag to pan, wheel to zoom."
@@ -508,7 +524,8 @@ int main(int argc,char** argv) {
                 DrawRectangle(0,int(h-46*u),int(w),int(46*u),Fade(edge,.8f));
                 centered(font,options.gallery
                          ?"1-7  SWITCH WORLD     DRAG  PAN     WHEEL / W S  ZOOM     ESC  BACK"
-                         :"DRAG  PAN     WHEEL / W S  ZOOM     RIGHT-CLICK  MARK IT     ESC  BACK",
+                         :(options.dev?"DRAG  PAN     WHEEL / W S  ZOOM     G  JUMP TO TARGET     RIGHT-CLICK  MARK IT     ESC  BACK"
+                                      :"DRAG  PAN     WHEEL / W S  ZOOM     RIGHT-CLICK  MARK IT     ESC  BACK"),
                          w*.5f,h-30*u,10*u,{128,158,176,255});
                 EndDrawing();
                 if(elapsed-lastState>=.2) {writeState(options,mixer,gpu,vendor,true);lastState=elapsed;}
