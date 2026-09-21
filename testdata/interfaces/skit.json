@@ -15,9 +15,9 @@
   "example": {
     "kinds": 8,
     "total": 406,
-    "want_one_track": 276,
-    "want_two_tracks": 130,
-    "need_a_track_muted": 32,
+    "want_one_track": 279,
+    "want_two_tracks": 127,
+    "need_a_track_muted": 40,
     "showing_rule": "(playing & wants) == wants && (playing & hides) == 0"
   }
 }

@@ -24,6 +24,8 @@
     "pose": 4,
     "pose_name": "walk",
     "wearsHat": true,
+    "figure_id": "FIG-F0ED",
+    "cast_id_ignores_pose": true,
     "pose_count": 24,
     "cloth_count": 12
   }

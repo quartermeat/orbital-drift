@@ -148,7 +148,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.20.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.21.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -204,7 +204,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.20.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.21.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -672,6 +672,9 @@ int main(int argc,char** argv) {
                 DrawRectangleRounded({cardX+cardW*.5f-portrait*.42f,cardTop+30*u,portrait*.84f,portrait+6*u},
                                      .08f,6,Fade(Color{scene.grass.r,scene.grass.g,scene.grass.b,255},.30f));
                 drawFigure(target.figure,{cardX+cardW*.5f,cardTop+30*u+portrait},portrait);
+                if(options.dev)
+                    centered(font,figureTag(target.figure),cardX+cardW*.5f,cardTop+cardH-38*u,10*u,
+                             Fade(Color{226,142,142,255},.9f));
                 centered(font,scene.found?"FOUND":(targetShowing?"THIS PERSON":"NOT HERE YET"),
                          cardX+cardW*.5f,cardTop+cardH-24*u,11*u,
                          scene.found?Color{170,232,200,255}

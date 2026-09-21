@@ -25,12 +25,14 @@
     "woods": 90,
     "fields": 39,
     "markers": 30,
-    "people": 1316,
+    "people": 1250,
     "skits": 406,
     "sizeof_PersonSpot": 32,
     "sizeof_Skit": 48,
-    "target_index": 318,
+    "target_index": 621,
     "target_layer": 0,
-    "target_outfit_is_unique": true
+    "target_outfit_is_unique": true,
+    "distinct_cast": 845,
+    "cast_appearing_more_than_once": 294
   }
 }

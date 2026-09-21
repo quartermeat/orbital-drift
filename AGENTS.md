@@ -161,12 +161,25 @@ drawings honest: a silhouette only its author can name is a shape, not an
 object. See [docs/interfaces/recognition.md](docs/interfaces/recognition.md);
 the judge matters, so the model is configurable.
 
+**A world has a cast, not a thousand strangers.** Every skit contains someone
+who also appears in another skit, so the same person turns up queueing here and
+sitting by a fire there. Roughly 1250 people are drawn from about 845
+characters, a third of whom recur. Enforced in `tests/scene_test.cpp`, and
+repaired rather than assumed — re-rolling the target can strand the skit that
+borrowed them.
+
+**The target is the exception and must appear exactly once.** It gets a freshly
+rolled outfit after the cast is built, never a borrowed one. A recurring target
+would mean two right answers.
+
 **A figure's identity is `figureId()`** — every garment, colour, pattern and
 pose folded into one number, printed as `FIG-XXXX`. Two figures with the same
-id are the same Waldo. This is stricter than `sameOutfit`, and both are needed:
-the id is exact appearance, `sameOutfit` is what a player can actually tell
-apart in a crowd, which ignores pose and skin because at forty pixels they do
-not separate two people in the same clothes.
+id are the same drawing. `castId()` is the *person* — everything except the
+pose — which is how the cast requirement is expressed: one character in two
+poses shares a `castId` while their `figureId`s differ. `sameOutfit` is a third
+thing: what a player can actually tell apart at forty pixels, ignoring pose and
+skin, and it is the fairness rule for the hunt. All three are used, for
+different questions.
 
 **Nobody stands alone.** Every person belongs to a *skit* -- a queue, a ring
 of talkers, a chase, a pair, an audience round a performer, a picnic, a work

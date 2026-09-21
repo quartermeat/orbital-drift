@@ -12,6 +12,7 @@
 #include "person.hpp"
 #include "prop.hpp"
 #include <algorithm>
+#include <map>
 #include <cstdint>
 #include <vector>
 
@@ -318,6 +319,11 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
     // People, one set per track, placed as skits. Each layer is built the same
     // way from its own seed, so turning a track on adds vignettes that were
     // never there before.
+    // A world has a cast, not a thousand strangers. Every skit after the first
+    // in a layer borrows somebody already seen elsewhere, so the same person
+    // turns up queueing here and sitting by a fire over there -- which is what
+    // makes a page feel like one place rather than a crowd generator.
+    std::vector<Figure> cast;
     for (int layer = 0; layer < layerCount && !anchors.empty(); ++layer) {
         Rng crowd(scene.seed ^ (uint64_t(layer + 1) * 0x9E3779B97F4A7C15ull));
         int skitCount = 52 + crowd.below(14);
@@ -365,10 +371,19 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
                 }
             }
             float facing = crowd.range(0, 6.2831853f);
+            bool borrowed = false;
             auto put = [&](float x, float y, unsigned char pose) {
                 if (elevationAt(scene.seed, x, y) < SeaLevel + .015f) return;
                 if (x < 8 || y < 8 || x > SceneWidth - 8 || y > SceneHeight - 8) return;
-                Figure figure = rollFigure(crowd);
+                Figure figure;
+                if (!borrowed && !cast.empty()) {
+                    figure = cast[size_t(crowd.below(int(cast.size())))];   // someone we have met
+                    borrowed = true;
+                } else {
+                    figure = rollFigure(crowd);
+                    cast.push_back(figure);    // a new face joins the cast
+                    if (cast.size() > 400) cast.erase(cast.begin());
+                }
                 figure.pose = pose;            // the skit decides what they are doing
                 scene.people.push_back({x, y, crowd.range(11.f, 16.f),
                                         static_cast<unsigned char>(layer), skitIndex, figure});
@@ -501,6 +516,20 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
                 other.x += dx < 0 ? -push : push;   // step aside, same skit, same place
             }
         }
+        // The target is a face nobody else wears, so give it a fresh outfit
+        // rather than a borrowed one. Everything else keeps its cast identity.
+        {
+            Figure& mine = scene.people[size_t(scene.target)].figure;
+            unsigned char pose = mine.pose;
+            for (int attempt = 0; attempt < 64; ++attempt) {
+                Figure candidate = rollFigure(rng);
+                candidate.pose = pose;
+                bool clashes = false;
+                for (int i = 0; i < int(scene.people.size()) && !clashes; ++i)
+                    if (i != scene.target) clashes = sameOutfit(candidate, scene.people[size_t(i)].figure);
+                if (!clashes) { mine = candidate; break; }
+            }
+        }
         const Figure wanted = scene.people[size_t(scene.target)].figure;
         for (int i = 0; i < int(scene.people.size()); ++i) {
             if (i == scene.target) continue;
@@ -508,6 +537,42 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
             for (int guard = 0; guard < 8 && sameOutfit(wanted, other); ++guard) {
                 other.shirt = static_cast<unsigned char>(rng.below(ClothCount));
                 other.hat = static_cast<unsigned char>(rng.below(ClothCount));
+            }
+        }
+    }
+
+    // Every skit must share somebody with another skit. Re-rolling the target
+    // can strand the skit it belonged to, so this is checked and repaired
+    // rather than assumed from the way they were built.
+    {
+        std::map<uint32_t, int> seenIn;                 // figure id -> how many skits
+        std::map<uint32_t, std::vector<int>> whichSkits;
+        for (const PersonSpot& spot : scene.people) {
+            uint32_t id = castId(spot.figure);   // the person, not the pose
+            auto& skits = whichSkits[id];
+            if (std::find(skits.begin(), skits.end(), spot.skit) == skits.end()) skits.push_back(spot.skit);
+        }
+        for (auto& [id, skits] : whichSkits) seenIn[id] = int(skits.size());
+
+        for (int index = 0; index < int(scene.skits.size()); ++index) {
+            bool shares = false;
+            for (const PersonSpot& spot : scene.people)
+                if (spot.skit == index && seenIn[castId(spot.figure)] > 1) { shares = true; break; }
+            if (shares) continue;
+            // Lend this skit somebody from a different one.
+            for (PersonSpot& spot : scene.people) {
+                if (spot.skit != index || (scene.target >= 0 && &spot == &scene.people[size_t(scene.target)])) continue;
+                for (const PersonSpot& other : scene.people) {
+                    if (other.skit == index) continue;
+                    if (scene.target >= 0 && &other == &scene.people[size_t(scene.target)]) continue;
+                    unsigned char pose = spot.figure.pose;
+                    spot.figure = other.figure;
+                    spot.figure.pose = pose;           // keep what this skit is doing
+                    seenIn[castId(spot.figure)] += 1;
+                    shares = true;
+                    break;
+                }
+                if (shares) break;
             }
         }
     }

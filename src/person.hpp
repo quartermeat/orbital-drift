@@ -127,6 +127,23 @@ inline uint32_t figureId(const Figure& figure) {
     return hash;
 }
 
+// Who someone *is*, as opposed to how they are drawn right now: the same
+// person queueing here and sitting by a fire there is one member of the cast in
+// two poses. Everything except the pose.
+//
+// figureId is the exact depiction; castId is the person. A recurring character
+// shares a castId across skits while every figureId differs.
+inline uint32_t castId(const Figure& figure) {
+    uint32_t hash = 2166136261u;
+    auto fold = [&](uint32_t value) { hash = (hash ^ value) * 16777619u; };
+    fold(figure.skin); fold(figure.hair); fold(figure.shirt); fold(figure.stripe);
+    fold(figure.trousers); fold(figure.hat); fold(figure.prop);
+    fold(uint32_t(figure.pattern));
+    fold(figure.wearsHat ? 1u : 0u); fold(figure.carries ? 1u : 0u);
+    hash ^= hash >> 16;
+    return hash;
+}
+
 // The id as people will read it out: FIG-XXXX.
 inline std::string figureTag(const Figure& figure) {
     static const char* digits = "0123456789ABCDEF";

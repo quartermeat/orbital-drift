@@ -44,6 +44,41 @@ int main() {
             require((a.skits[i].wants&a.skits[i].hides)==0,"a skit never wants and hides the same track");
             require((a.skits[i].wants>>a.skits[i].primary)&1u,"a skit always wants its own primary track");
         }
+        // A world has a cast: every skit shares at least one person with another
+        // skit, so the same faces recur instead of a thousand strangers.
+        {
+            std::map<uint32_t,std::vector<int>> appearsIn;
+            for (const PersonSpot& spot:a.people) {
+                auto& skits=appearsIn[castId(spot.figure)];   // the person, not the pose
+                if (std::find(skits.begin(),skits.end(),spot.skit)==skits.end()) skits.push_back(spot.skit);
+            }
+            int lonely=0;
+            for (int index=0;index<int(a.skits.size());++index) {
+                bool shares=false;
+                for (const PersonSpot& spot:a.people)
+                    if (spot.skit==index&&appearsIn[castId(spot.figure)].size()>1) {shares=true;break;}
+                if (!shares) ++lonely;
+            }
+            require(lonely==0,"every skit contains someone who also appears in another skit");
+
+            // The cast must be a cast, not one person cloned everywhere.
+            int recurring=0,mostSkits=0;
+            for (auto& [id,skits]:appearsIn) {
+                if (skits.size()>1) ++recurring;
+                mostSkits=std::max(mostSkits,int(skits.size()));
+            }
+            require(recurring>=int(a.skits.size())/3,"a good share of the cast recurs");
+            require(mostSkits<int(a.skits.size())/4,"no single figure carries the whole world");
+
+            // The target is nobody else: that is the entire hunt.
+            uint32_t targetId=castId(a.people[size_t(a.target)].figure);
+            require(appearsIn[targetId].size()==1,"the target appears in exactly one skit");
+            require(figureId(a.people[size_t(a.target)].figure)!=0,"the target has an id");
+            int wearingIt=0;
+            for (const PersonSpot& spot:a.people) if (castId(spot.figure)==targetId) ++wearingIt;
+            require(wearingIt==1,"nobody else is the target");
+        }
+
         // Configurations: most skits want one track, some want two, a few need
         // something silent. Without the spread there are no specific configs.
         int single=0,paired=0,needsQuiet=0;

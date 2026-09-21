@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 
 using namespace orbital;
@@ -141,6 +142,8 @@ int main(int argc, char** argv) {
         json.field("pose", (long long)figure.pose);
         json.field("pose_name", std::string(Poses[figure.pose % PoseCount].name));
         json.field("wearsHat", figure.wearsHat);
+        json.field("figure_id", std::string(figureTag(figure)));
+        json.field("cast_id_ignores_pose", castId(figure) == castId([&]{ Figure other = figure; other.pose = (figure.pose + 1) % PoseCount; return other; }()));
         json.field("pose_count", (long long)PoseCount);
         json.field("cloth_count", (long long)ClothCount);
         json.close('}');
@@ -174,6 +177,14 @@ int main(int argc, char** argv) {
         json.field("target_index", (long long)scene.target);
         json.field("target_layer", (long long)scene.people[size_t(scene.target)].layer);
         json.field("target_outfit_is_unique", countOutfitMatches(scene) == 1);
+        {
+            std::map<uint32_t, int> appearances;
+            for (const PersonSpot& spot : scene.people) ++appearances[castId(spot.figure)];
+            int recurring = 0;
+            for (auto& [id, count] : appearances) { (void)id; if (count > 1) ++recurring; }
+            json.field("distinct_cast", (long long)appearances.size());
+            json.field("cast_appearing_more_than_once", (long long)recurring);
+        }
         json.close('}');
         json.close('}');
         write(dir, "scene", json);
