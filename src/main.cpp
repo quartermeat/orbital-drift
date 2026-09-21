@@ -133,7 +133,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.15.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.15.1\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -189,7 +189,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.15.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.15.1\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -304,7 +304,7 @@ int main(int argc,char** argv) {
             viewX=SceneWidth*.5;viewY=SceneHeight*.5;
         }
         double started=GetTime(),lastState=-1,toastAt=-9,finaleAt=-9;
-        bool finishing=false;
+        bool finishing=false,panBlocked=false;
         bool captured=false;
         long frame=0;
         std::string toast;
@@ -404,7 +404,8 @@ int main(int argc,char** argv) {
                 double fit=std::min(w/double(SceneWidth),h/double(SceneHeight));
                 auto screenX=[&](double ix){return (ix-viewX)*viewScale+halfW;};
                 auto screenY=[&](double iy){return (iy-viewY)*viewScale+halfH;};
-                if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)&&!scene.found) {
+                if(IsMouseButtonReleased(MOUSE_BUTTON_LEFT))panBlocked=false;
+                if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)&&!panBlocked) {
                     Vector2 drag=GetMouseDelta();
                     viewX-=drag.x/viewScale;viewY-=drag.y/viewScale;
                 }
@@ -450,6 +451,11 @@ int main(int argc,char** argv) {
                 if(overBeacon&&!scene.found
                    &&(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)||IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
                     scene.found=beaconFound=true;
+                    // The claim click must not also drag the map. Blocked until
+                    // the button comes back up, not for the life of the world:
+                    // a found world still has to be explorable.
+                    panBlocked=true;
+                    bool wasComplete=progress.complete();
                     toast="Found them";toastAt=elapsed;reloadError.clear();
                     if(!progress.complete()&&planetTrack==progress.frontier()) {
                         unlockedName=trackName(progress.nextLocked());
@@ -459,9 +465,10 @@ int main(int argc,char** argv) {
                         mixer.enabled|=1u<<progress.frontier();unlockedAt=elapsed;
                         std::cout<<"[unlock] "<<unlockedName<<" ("<<progress.unlocked<<'/'<<campaign.count()<<')'<<std::endl;
                     }
-                    // Completing the campaign goes to the finale; otherwise back
-                    // up to the galaxy to hear what just arrived.
-                    finishing=progress.complete();
+                    // Only the run that *completes* the campaign opens the
+                    // finale. Finding someone in the bonus world afterwards must
+                    // not reopen it.
+                    finishing=!wasComplete&&progress.complete();
                     leaving=true;
                 }
                 SetMouseCursor(overBeacon?MOUSE_CURSOR_POINTING_HAND:MOUSE_CURSOR_DEFAULT);
@@ -673,7 +680,7 @@ int main(int argc,char** argv) {
                 }
             }
             auto enterPlanet=[&](int track){
-                view=View::Planet;planetTrack=track;
+                view=View::Planet;planetTrack=track;panBlocked=false;
                 viewScale=std::min(w/double(SceneWidth),h/double(SceneHeight));
                 viewX=SceneWidth*.5;viewY=SceneHeight*.5;
                 enteredAt=elapsed;(void)enteredAt;

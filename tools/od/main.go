@@ -13,7 +13,7 @@ func usage() {
 	fmt.Println(`od - Orbital Drift tooling
 
   od ci [pipeline.yaml]   run the whole pipeline (this is the one to run)
-  od check <name>         one live check: controls | hot-reload | progression | find
+  od check <name>         one live check: controls | hot-reload | progression | find | revisit
   od campaigns            parse every campaigns/*.conf and report
   od worlds               save a PNG of every world background`)
 }
@@ -45,6 +45,8 @@ func main() {
 			os.Exit(checkProgression(root))
 		case "find":
 			os.Exit(checkFind(root))
+		case "revisit":
+			os.Exit(checkRevisit(root))
 		default:
 			fmt.Fprintf(os.Stderr, "unknown check %q\n", os.Args[2])
 			os.Exit(2)

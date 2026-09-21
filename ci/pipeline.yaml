@@ -50,3 +50,5 @@ stages:
         run: tools/od/od check progression
       - name: find
         run: tools/od/od check find
+      - name: revisit
+        run: tools/od/od check revisit

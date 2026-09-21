@@ -174,6 +174,40 @@ func checkProgression(root string) int {
 	return app.Report("silent start, sealed input refused, sigil opens a world without unsealing, Escape returns")
 }
 
+// checkRevisit: a world you already solved stays usable. Claiming once
+// permanently disabled panning, and any later find reopened the finale.
+func checkRevisit(root string) int {
+	writeProgress(root, "orbital-drift", 7) // a finished campaign
+	app, err := Launch(root, "revisit", "--dev", "--resume", "--world", "0", "--seconds", "70")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "FAIL: "+err.Error())
+		return 1
+	}
+	defer app.Close()
+
+	app.Require(app.State().Planet.View == "planet", "did not open in a world")
+	app.Key("g")
+	target := app.State()
+	app.Require(target.Planet.OnScreen, "G did not bring the target on screen")
+	app.Click(1, target.Planet.BeaconX, target.Planet.BeaconY)
+
+	claimed := app.State()
+	app.Require(claimed.Planet.View != "finale",
+		"a find in an already-complete campaign reopened the finale")
+	app.Require(claimed.Planet.View == "system", "claiming did not return to the galaxy (view %q)", claimed.Planet.View)
+
+	// Back into the same world, which is now solved, and pan it.
+	app.Key("z")
+	back := app.State()
+	app.Require(back.Planet.View == "planet", "could not re-enter the solved world")
+	app.Require(back.Planet.Found, "the world forgot it had been solved")
+	before := back.Planet.ViewX
+	app.Drag(app.Width/4, app.Height/4, 260, 0)
+	after := app.State().Planet.ViewX
+	app.Require(math.Abs(after-before) > 1, "panning is dead in a solved world (view_x stayed %.1f)", before)
+	return app.Report("a solved world still pans, and finding there does not reopen the finale")
+}
+
 // checkFind: the target can be reached, claimed, and the claim pays out.
 func checkFind(root string) int {
 	clearProgress(root)

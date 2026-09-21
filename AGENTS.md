@@ -133,6 +133,12 @@ produce.
 - **`Mixer::render`'s parameter is `frameCount`, never `count`.** A member
   called `count` shadowed it once and sent the per-track loops off the end of
   the array.
+- **Only the find that *completes* a campaign opens the finale.** Testing
+  `progress.complete()` after the fact reopens it on every later find,
+  including in the bonus world.
+- **Suppressing the pan on a claim must end when the button comes up**, not
+  when the world is solved. Blocking on `scene.found` left every solved world
+  permanently unpannable.
 - The campaign is completed when every track is unlocked, which opens the
   finale. `Esc` leaves it for the galaxy; `V` there re-opens it.
 - **The last world unlocked is deliberately kept.** Finding its target unlocks
