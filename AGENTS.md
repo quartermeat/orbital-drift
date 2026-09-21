@@ -178,6 +178,20 @@ world opens showing two crowds because two tracks are on. Toggling a track in
 the galaxy view cascades straight through, because the draw reads
 `mixer.enabled` rather than any copied state — keep it that way.
 
+**An unlocked world can always be visited**, whether or not its own track is
+sounding; you simply see the crowds of whatever is playing. If the target's own
+layer is silent the find box says so rather than letting you hunt someone who
+is not drawn, and there is nothing to claim.
+
+**Nobody may stand in front of the target.** People are drawn in y order, so
+anyone just below them covers them completely: the click still works but the
+hunt is unwinnable because they cannot be seen. Skits cluster people, which
+makes this likely rather than rare, so generation steps the offenders aside and
+a test asserts it.
+
+**A click on the wrong person says "Not them".** Silence on a near miss is
+indistinguishable from a broken click, which is exactly how it gets reported.
+
 **The hunt is for a person.** One of the world's ~500 people is the target; the
 find box renders that exact figure at the size it reaches at full zoom, so what
 you are shown is what you are looking for. They carry an invisible hit box

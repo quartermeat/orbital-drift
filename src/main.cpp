@@ -133,7 +133,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.16.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.17.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -189,7 +189,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.16.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.17.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -442,16 +442,20 @@ int main(int argc,char** argv) {
                 }
                 zoomLevel=viewScale/fit;viewCenterX=viewX;viewCenterY=viewY;
 
+                uint32_t playing=mixer.enabled;
                 const PersonSpot& target=scene.people[size_t(scene.target)];
                 beaconWorldX=target.x;beaconWorldY=target.y;
                 double beaconScreenX=screenX(target.x),beaconScreenY=screenY(target.y);
                 double beaconPixels=target.height*viewScale;
-                beaconOnScreen=beaconScreenX>0&&beaconScreenY>0&&beaconScreenX<w&&beaconScreenY<h;
+                bool targetShowing=((playing>>target.layer)&1u)!=0;
+                beaconOnScreen=targetShowing&&beaconScreenX>0&&beaconScreenY>0&&beaconScreenX<w&&beaconScreenY<h;
                 beaconX=float(beaconScreenX);beaconY=float(beaconScreenY);beaconFound=scene.found;
                 // An invisible box around the target, drawn feet-up and never
                 // smaller than a comfortable click.
                 Rectangle hitBox=personHitBox(beaconScreenX,beaconScreenY,beaconPixels);
                 bool overBeacon=beaconOnScreen&&CheckCollisionPointRec(pointer,hitBox);
+                bool guessed=(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)||IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
+                             &&!overBeacon&&!scene.found;
                 if(overBeacon&&!scene.found
                    &&(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)||IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
                     scene.found=beaconFound=true;
@@ -545,7 +549,6 @@ int main(int argc,char** argv) {
                     DrawPolyLines(at,3,marker.size*z,-90,tint(shade(scene.palette[marker.palette],.5f,.25f,{12,18,26}),.8f));
                 }
                 int drawnPeople=0,layersOn=0;
-                uint32_t playing=mixer.enabled;
                 for(int i=0;i<campaign.count();++i)layersOn+=(playing>>i)&1u;
                 for(const PersonSpot& spot:scene.people) {
                     // A layer exists only while its track does.
@@ -570,6 +573,12 @@ int main(int argc,char** argv) {
                         continue;
                     }
                     drawFigure(spot.figure,{float(sx),float(sy)},px);
+                    // A click that lands on the wrong person must say so. With no
+                    // answer at all, a near miss is indistinguishable from a
+                    // broken click.
+                    if(guessed&&CheckCollisionPointRec(pointer,personHitBox(sx,sy,px))) {
+                        toast="Not them";toastAt=elapsed;reloadError.clear();guessed=false;
+                    }
                     // Dev: every person boxed in the colour of the track whose
                     // layer they belong to, matching that track's card.
                     if(options.dev) {
@@ -598,10 +607,12 @@ int main(int argc,char** argv) {
                 text(font,options.gallery?"GALLERY":(options.dev?"WORLD  /  DEV":"WORLD"),pad,pad-10*u,12*u,
                      options.dev?Color{226,142,142,255}:Color{118,150,172,255});
                 text(font,trackName(planetTrack),pad,pad+8*u,34*u,{231,238,244,255});
-                text(font,scene.found?"This world has given up its secret"
-                                     :(options.gallery?"1-7 switch worlds. Drag to pan, wheel to zoom."
-                                                      :"Someone down there is dressed like this. Zoom in and look."),
-                     pad,pad+50*u,13*u,{136,162,182,255});
+                const char* lead = scene.found ? "This world has given up its secret"
+                    : options.gallery ? "1-7 switch worlds. Drag to pan, wheel to zoom."
+                    : targetShowing ? "Someone down there is dressed like this. Zoom in and look."
+                                    : "This world is quiet. Wake its own signal to bring them out.";
+                text(font,lead,pad,pad+50*u,13*u,
+                     targetShowing||scene.found?Color{136,162,182,255}:Color{196,158,126,255});
                 // The find box shows the target at the size it reaches at full
                 // zoom, so what you are hunting for is exactly what you will see.
                 float portrait=std::max(96*u,float(target.height*fit*9.0)*1.45f);
@@ -613,8 +624,10 @@ int main(int argc,char** argv) {
                 DrawRectangleRounded({cardX+cardW*.5f-portrait*.42f,cardTop+30*u,portrait*.84f,portrait+6*u},
                                      .08f,6,Fade(Color{scene.grass.r,scene.grass.g,scene.grass.b,255},.30f));
                 drawFigure(target.figure,{cardX+cardW*.5f,cardTop+30*u+portrait},portrait);
-                centered(font,scene.found?"FOUND":"THIS PERSON",cardX+cardW*.5f,cardTop+cardH-24*u,11*u,
-                         scene.found?Color{170,232,200,255}:Fade(want,.9f));
+                centered(font,scene.found?"FOUND":(targetShowing?"THIS PERSON":"NOT HERE YET"),
+                         cardX+cardW*.5f,cardTop+cardH-24*u,11*u,
+                         scene.found?Color{170,232,200,255}
+                                   :(targetShowing?Fade(want,.9f):Color{196,158,126,255}));
                 float mapSize=118*u,mapX=w-pad-mapSize,mapY=h-pad-mapSize;
                 DrawRectangleRec({mapX,mapY,mapSize,mapSize*float(SceneHeight)/SceneWidth},Fade({8,13,21,255},.86f));
                 DrawRectangleLinesEx({mapX,mapY,mapSize,mapSize*float(SceneHeight)/SceneWidth},u,Fade(want,.3f));
@@ -692,14 +705,14 @@ int main(int argc,char** argv) {
             };
             // Read the mixer live, not the mask snapshotted at the top of the
             // frame: a track woken earlier this frame is already on.
-            uint32_t live=mixer.enabled;
+            // An unlocked world can always be visited, playing or not; you
+            // simply see the crowds of whichever tracks are sounding.
             if(hoveredNode>=0&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                if(!progress.isUnlocked(hoveredNode))     {toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();}
-                else if(!(live&(1u<<hoveredNode)))        {toast="Wake the signal to reach its world";toastAt=elapsed;reloadError.clear();}
+                if(!progress.isUnlocked(hoveredNode)) {toast="That signal is still sealed";toastAt=elapsed;reloadError.clear();}
                 else enterPlanet(hoveredNode);
             }
             // Z drops into the frontier world without hunting a moving node.
-            if(IsKeyPressed(KEY_Z)&&progress.isUnlocked(progress.frontier())&&(live&(1u<<progress.frontier())))
+            if(IsKeyPressed(KEY_Z)&&progress.isUnlocked(progress.frontier()))
                 enterPlanet(progress.frontier());
             if(IsKeyPressed(KEY_V)&&progress.complete()) {view=View::Finale;finaleAt=elapsed;}
             if(IsKeyPressed(KEY_ESCAPE))break;
@@ -789,8 +802,7 @@ int main(int argc,char** argv) {
                 centered(font,std::to_string(i+1),nodes[i].x,nodes[i].y-5*u,10*u,{235,245,255,255});
                 if(hoveredNode==i) {
                     centered(font,trackName(i),nodes[i].x,nodes[i].y+27*u,14*u,Colors[i]);
-                    centered(font,(mask&(1u<<i))?"CLICK TO DESCEND":"WAKE IT FIRST",nodes[i].x,nodes[i].y+44*u,10*u,
-                             Fade(c,(mask&(1u<<i))?.9f:.45f));
+                    centered(font,"CLICK TO DESCEND",nodes[i].x,nodes[i].y+44*u,10*u,Fade(c,(mask&(1u<<i))?.9f:.6f));
                 }
             }
             if(sigilPulse>.012f) {

@@ -410,6 +410,20 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
         if (scene.people[size_t(i)].layer == track % std::max(1, layerCount)) own.push_back(i);
     if (!own.empty()) {
         scene.target = own[size_t(rng.below(int(own.size())))];
+        // Nobody may stand in front of the target. People are drawn in order of
+        // y, so someone slightly below them covers them completely -- clicking
+        // still works, but the hunt is unwinnable because they cannot be seen.
+        // Skits cluster people, which makes this likely rather than rare.
+        PersonSpot& mark = scene.people[size_t(scene.target)];
+        for (PersonSpot& other : scene.people) {
+            if (&other == &mark) continue;
+            float dx = other.x - mark.x, dy = other.y - mark.y;
+            float near = mark.height * .75f;
+            if (dy > -mark.height * .15f && dy < near && std::abs(dx) < near) {
+                float push = near + 4.f - std::abs(dx);
+                other.x += dx < 0 ? -push : push;   // step aside, same skit, same place
+            }
+        }
         const Figure wanted = scene.people[size_t(scene.target)].figure;
         for (int i = 0; i < int(scene.people.size()); ++i) {
             if (i == scene.target) continue;

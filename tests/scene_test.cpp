@@ -59,6 +59,18 @@ int main() {
             require(dx*dx+dy*dy<260.f*260.f,"a skit's people stand together");
         }
 
+        // The target must be visible: people are drawn in y order, so anyone
+        // just below them hides them and the hunt cannot be won.
+        {
+            const PersonSpot& mark=a.people[size_t(a.target)];
+            for (const PersonSpot& other:a.people) {
+                if (&other==&mark) continue;
+                float dx=other.x-mark.x,dy=other.y-mark.y,near=mark.height*.75f;
+                require(!(dy>-mark.height*.15f&&dy<near&&std::abs(dx)<near),
+                        "nobody stands in front of the target");
+            }
+        }
+
         // Nothing may sit in the sea, or the place stops reading as a place.
         for (const Town& town:a.towns) {
             require(elevationAt(a.seed,town.x,town.y)>ShoreLevel,"towns stand on land");

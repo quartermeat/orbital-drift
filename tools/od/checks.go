@@ -205,7 +205,24 @@ func checkRevisit(root string) int {
 	app.Drag(app.Width/4, app.Height/4, 260, 0)
 	after := app.State().Planet.ViewX
 	app.Require(math.Abs(after-before) > 1, "panning is dead in a solved world (view_x stayed %.1f)", before)
-	return app.Report("a solved world still pans, and finding there does not reopen the finale")
+
+	// An unlocked world is visitable whether or not its own track is sounding;
+	// you just see the crowds of whatever is playing.
+	app.Key("Escape")
+	app.Key("m") // silence everything
+	silent := app.State()
+	stillOn := 0
+	for _, track := range silent.Tracks {
+		if track.Enabled {
+			stillOn++
+		}
+	}
+	app.Require(stillOn == 0, "M left %d tracks sounding", stillOn)
+	app.Key("z")
+	quiet := app.State()
+	app.Require(quiet.Planet.View == "planet", "a silent world could not be entered (view %q)", quiet.Planet.View)
+	app.Require(!quiet.Planet.OnScreen, "the target showed even though its own layer is silent")
+	return app.Report("a solved world still pans, a silent world can be visited, and finding there does not reopen the finale")
 }
 
 // checkFind: the target can be reached, claimed, and the claim pays out.
