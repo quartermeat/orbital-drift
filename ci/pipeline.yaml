@@ -37,6 +37,8 @@ stages:
         run: build/orbital-drift --check-assets
       - name: campaigns-load
         run: tools/od/od campaigns
+      - name: interfaces
+        run: tools/od/od interfaces
 
   - name: live
     parallel: false         # every one of these opens a window

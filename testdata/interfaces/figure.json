@@ -1,0 +1,30 @@
+{
+  "interface": "figure",
+  "produced_by": "src/person.hpp rollFigure()",
+  "consumed_by": "src/figure.hpp drawFigure()",
+  "documented_in": "docs/interfaces/figure.md",
+  "sizeof": 11,
+  "fields": {
+    "skin": "index 0..4",
+    "hair": "index 0..5",
+    "shirt": "index 0..11",
+    "stripe": "index 0..11",
+    "trousers": "index 0..11",
+    "hat": "index 0..11",
+    "prop": "index 0..11",
+    "pattern": "Solid|Stripe|Spot",
+    "pose": "index 0..23",
+    "wearsHat": "bool",
+    "carries": "bool"
+  },
+  "example": {
+    "skin": 3,
+    "shirt": 2,
+    "pattern": 1,
+    "pose": 4,
+    "pose_name": "walk",
+    "wearsHat": true,
+    "pose_count": 24,
+    "cloth_count": 12
+  }
+}

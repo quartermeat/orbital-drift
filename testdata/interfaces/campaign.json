@@ -1,0 +1,31 @@
+{
+  "interface": "campaign",
+  "produced_by": "campaigns/*.conf",
+  "consumed_by": "src/campaign.hpp loadCampaign()",
+  "documented_in": "docs/interfaces/campaign.md",
+  "sizeof": 208,
+  "fields": {
+    "title": "string",
+    "subtitle": "string",
+    "key": "string",
+    "stems": "path",
+    "tempo": "int",
+    "bars": "int",
+    "unlock": "right-to-left|left-to-right",
+    "seed": "uint64 (from title unless given)",
+    "track.N.name": "string",
+    "track.N.file": "filename",
+    "track.N.role": "string",
+    "track.N.color": "rrggbb"
+  },
+  "example": {
+    "title": "Orbital Drift",
+    "tempo": 72,
+    "bars": 16,
+    "right_to_left": true,
+    "tracks": 7,
+    "first_track": "Nebula Pad",
+    "first_file": "01 Nebula Pad.wav",
+    "all_mask": 127
+  }
+}

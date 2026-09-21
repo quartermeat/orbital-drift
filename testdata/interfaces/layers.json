@@ -1,0 +1,22 @@
+{
+  "interface": "layers",
+  "produced_by": "assets/layers.conf",
+  "consumed_by": "src/hotreload.hpp loadLayerConfig()",
+  "documented_in": "docs/interfaces/layers.md",
+  "sizeof": 56,
+  "fields": {
+    "star.count": "int 0..4000",
+    "orbit.base": "float",
+    "orbit.step": "float",
+    "glow.scale": "float",
+    "energy.gain": "float"
+  },
+  "example": {
+    "starCount": 260,
+    "orbitBase": 0.430,
+    "orbitStep": 0.092,
+    "glowScale": 1.000,
+    "energyGain": 7.000,
+    "hot_reloaded": true
+  }
+}

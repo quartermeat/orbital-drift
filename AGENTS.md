@@ -419,12 +419,38 @@ revisit when arbitrary projects load.
 - Generated output (`build/`, `artifacts/`, `assets/audio/`, `assets/font.ttf`)
   is gitignored. Don't commit stems.
 
+## Interfaces
+
+Every boundary between layers is written down in `docs/interfaces/`, and every
+document points at a fixture in `testdata/interfaces/` that the live code
+produces. `docs/interfaces/README.md` is the index.
+
+**The rule: the documentation must match the interface on every commit.**
+`make ci` regenerates every fixture from the code and diffs it against what is
+committed. An interface cannot change without its fixture changing, and a
+changed fixture is the signal to update its document in the same commit. When
+that happens: `make interfaces`, then edit the document, then commit both.
+
+- **Fixtures are generated, never hand-written.** `tools/contracts.cpp` emits
+  the C++ side; `tools/od/contracts.go` reflects over the Go `State` and
+  pipeline types. Hand-kept field lists drift silently, which is the failure
+  this exists to prevent.
+- **`sizeof` is recorded for every C++ struct.** C++ has no reflection, so a
+  field added without updating the emitter would otherwise slip through; a
+  changed `sizeof` makes the diff fail and forces a look.
+- **`build/contracts` is part of `all`.** The first time this was tested the
+  emitter failed to compile, the check ran the stale binary, and it passed on
+  a lie. `od interfaces` now rebuilds it first and fails if it cannot.
+- The two cross-language boundaries, `state` and `pipeline`, matter most:
+  nothing but this check couples the C++ and the Go.
+
 ## Versioning and pushing
 
 Home guide rule applies: every commit advances `MAJOR.MINOR.PATCH` in `VERSION`,
 the subject is prefixed `vX.Y.Z: `, and an annotated tag `vX.Y.Z` points at it.
 
-**Run `make ci` before every push.** Not the individual checks — the whole
+**Run `make ci` before every push.** It includes the interface check, so a
+commit cannot leave the documentation behind. Not the individual checks — the whole
 pipeline, so everything is verified against the same build. It takes about 70
 seconds. If it fails, fix it before pushing rather than pushing and mentioning
 the failure. The first time it ran it found a segfault that none of the

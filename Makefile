@@ -3,8 +3,8 @@ RAYLIB := build/deps/raylib-5.5/src
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
 LDLIBS := $(RAYLIB)/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
 
-.PHONY: all setup run test check clean figures ci od worlds
-all: build/orbital-drift
+.PHONY: all setup run test check clean figures ci od worlds contracts interfaces
+all: build/orbital-drift build/contracts
 setup:
 	python3 scripts/setup.py
 $(RAYLIB)/raylib.h:
@@ -47,6 +47,15 @@ check: test all
 	./build/orbital-drift --check-assets
 run: all
 	./build/orbital-drift
+build/contracts: tools/contracts.cpp src/campaign.hpp src/scene.hpp src/progress.hpp src/person.hpp
+	mkdir -p build testdata/interfaces
+	$(CXX) $(CXXFLAGS) -Isrc $< -o $@
+contracts: build/contracts
+	./build/contracts testdata/interfaces
+# Rewrite every interface fixture from the live code. Run this when an
+# interface changes, then update its document in docs/interfaces.
+interfaces: build/contracts tools/od/od
+	tools/od/od interfaces --write
 build/figure-sheet: tools/figure_sheet.cpp src/figure.hpp src/scene.hpp $(RAYLIB)/libraylib.a
 	mkdir -p build artifacts
 	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) $< -o $@ $(LDLIBS)

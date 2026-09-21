@@ -1,0 +1,36 @@
+{
+  "interface": "scene",
+  "produced_by": "src/scene.hpp generateScene()",
+  "consumed_by": "src/main.cpp world view",
+  "documented_in": "docs/interfaces/scene.md",
+  "sizeof": 224,
+  "fields": {
+    "towns": "Town[] (x,y,radius,buildings)",
+    "roads": "Road[] (points)",
+    "woods": "Patch[] (blobs)",
+    "fields": "Field[]",
+    "markers": "Marker[]",
+    "people": "PersonSpot[] (x,y,height,layer,skit,figure)",
+    "skits": "Skit[] (kind,x,y,wants,hides,primary,members,bounds)",
+    "target": "index into people",
+    "palette": "Rgb[6]",
+    "sea/shallow/sand/grass/highland/forest": "Rgb"
+  },
+  "example": {
+    "seed_inputs": "track index + campaign seed",
+    "scene_width": 2560,
+    "scene_height": 1440,
+    "towns": 9,
+    "roads": 8,
+    "woods": 90,
+    "fields": 39,
+    "markers": 30,
+    "people": 1303,
+    "skits": 405,
+    "sizeof_PersonSpot": 32,
+    "sizeof_Skit": 44,
+    "target_index": 428,
+    "target_layer": 0,
+    "target_outfit_is_unique": true
+  }
+}

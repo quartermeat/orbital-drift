@@ -1,0 +1,17 @@
+{
+  "interface": "progress",
+  "produced_by": "src/progress.hpp saveProgress()",
+  "consumed_by": "src/progress.hpp loadProgress()",
+  "documented_in": "docs/interfaces/progress.md",
+  "sizeof": 12,
+  "fields": {
+    "unlocked": "int 1..count"
+  },
+  "example": {
+    "unlocked": 3,
+    "file": "artifacts/progress-<campaign>.json",
+    "count_and_direction": "supplied by the campaign, never stored",
+    "frontier_at_3_of_7_right_to_left": 4,
+    "next_locked": 3
+  }
+}

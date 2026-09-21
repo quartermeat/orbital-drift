@@ -1,0 +1,15 @@
+{
+  "consumed_by": "tools/od runPipeline()",
+  "documented_in": "docs/interfaces/pipeline.md",
+  "fields": {
+    "name": "string",
+    "stages[].name": "string",
+    "stages[].parallel": "bool (false for anything that opens a window)",
+    "stages[].steps[].name": "string",
+    "stages[].steps[].run": "shell, run from the repo root with DISPLAY set",
+    "stages[].timeout": "int seconds, default 180"
+  },
+  "interface": "pipeline",
+  "produced_by": "ci/pipeline.yaml",
+  "stop_on": "first failing stage"
+}
