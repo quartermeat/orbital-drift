@@ -3,7 +3,7 @@
   "produced_by": "src/scene.hpp generateScene()",
   "consumed_by": "src/main.cpp world view",
   "documented_in": "docs/interfaces/scene.md",
-  "sizeof": 224,
+  "sizeof": 248,
   "fields": {
     "towns": "Town[] (x,y,radius,buildings)",
     "roads": "Road[] (points)",
@@ -25,11 +25,11 @@
     "woods": 90,
     "fields": 39,
     "markers": 30,
-    "people": 1303,
-    "skits": 405,
+    "people": 1316,
+    "skits": 406,
     "sizeof_PersonSpot": 32,
-    "sizeof_Skit": 44,
-    "target_index": 428,
+    "sizeof_Skit": 48,
+    "target_index": 318,
     "target_layer": 0,
     "target_outfit_is_unique": true
   }

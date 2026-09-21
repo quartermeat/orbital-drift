@@ -79,6 +79,21 @@ int main() {
             if (seen==layerOf.end()) layerOf[spot.skit]=spot.layer;
             else require(seen->second==spot.layer,"every member of a skit is in the same layer");
         }
+        // Every skit has an object: a queue with nothing to queue for is just
+        // a line of people.
+        require(a.props.size()==a.skits.size(),"one object per skit");
+        std::map<int,int> propKinds;
+        for (const Skit& skit:a.skits) {
+            require(skit.prop>=0&&skit.prop<int(a.props.size()),"a skit points at a real object");
+            const Prop& prop=a.props[size_t(skit.prop)];
+            require(prop.size>12&&prop.size<45,"an object is a sensible size next to a person");
+            require(elevationAt(a.seed,prop.x,prop.y)>SeaLevel,"no object floats in deep water");
+            float dx=prop.x-skit.x,dy=prop.y-skit.y;
+            require(dx*dx+dy*dy<200.f*200.f,"an object stands with its skit");
+            ++propKinds[int(prop.kind)];
+        }
+        require(propKinds.size()>=8,"a world uses most of the object kinds");
+
         std::map<int,int> kinds;
         for (const Skit& skit:a.skits) ++kinds[int(skit.kind)];
         require(kinds.size()==size_t(SkitKindCount),"every kind of skit happens somewhere");

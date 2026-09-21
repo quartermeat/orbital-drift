@@ -42,6 +42,15 @@ stages:
       - name: dependencies
         run: tools/od/od deps
 
+  - name: recognition
+    # Renders every skit object alone and asks a local vision model to describe
+    # it. Slow, and it needs ollama with a vision model; it reports ENVIRONMENT
+    # rather than a failing drawing when that is missing.
+    timeout: 900
+    steps:
+      - name: objects
+        run: make -s props && tools/od/od recognise
+
   - name: live
     parallel: false         # every one of these opens a window
     timeout: 240

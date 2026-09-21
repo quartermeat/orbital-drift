@@ -5,6 +5,7 @@
 #include "hotreload.hpp"
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace orbital {
 
@@ -24,6 +25,15 @@ struct Rng {
     float range(float low, float high) { return low + (high - low) * unit(); }
     int below(int bound) { return bound > 0 ? int(next() % uint32_t(bound)) : 0; }
 };
+
+// Colour utility shared by people, props and terrain.
+inline Rgb shade(Rgb base, float gain, float mix, Rgb toward) {
+    auto blend = [&](unsigned char channel, unsigned char other) {
+        float value = channel * gain * (1 - mix) + other * mix;
+        return static_cast<unsigned char>(std::clamp(value, 0.f, 255.f));
+    };
+    return {blend(base.r, toward.r), blend(base.g, toward.g), blend(base.b, toward.b)};
+}
 
 // People keep their own colours rather than the terrain palette, so they read
 // as human on every world. Clothing is deliberately brighter than the ground.
@@ -96,6 +106,34 @@ inline Figure rollFigure(Rng& rng) {
     figure.wearsHat = rng.unit() < .42f;
     figure.carries = rng.unit() < .22f;
     return figure;
+}
+
+// A figure's identity: everything about how it looks, folded into one number.
+// Two figures with the same id are the same Waldo -- same pose, same garments,
+// same colours -- so a target can be named rather than merely pointed at.
+//
+// This is a stricter thing than `sameOutfit` below, and both are needed. The
+// id is exact appearance; `sameOutfit` is what a player can actually tell
+// apart in a crowd, which ignores pose and skin because at forty pixels they
+// do not separate two people wearing the same clothes.
+inline uint32_t figureId(const Figure& figure) {
+    uint32_t hash = 2166136261u;
+    auto fold = [&](uint32_t value) { hash = (hash ^ value) * 16777619u; };
+    fold(figure.skin); fold(figure.hair); fold(figure.shirt); fold(figure.stripe);
+    fold(figure.trousers); fold(figure.hat); fold(figure.prop);
+    fold(uint32_t(figure.pattern)); fold(figure.pose);
+    fold(figure.wearsHat ? 1u : 0u); fold(figure.carries ? 1u : 0u);
+    hash ^= hash >> 16;
+    return hash;
+}
+
+// The id as people will read it out: FIG-XXXX.
+inline std::string figureTag(const Figure& figure) {
+    static const char* digits = "0123456789ABCDEF";
+    uint32_t id = figureId(figure) & 0xFFFFu;
+    std::string tag = "FIG-";
+    for (int shift = 12; shift >= 0; shift -= 4) tag += digits[(id >> shift) & 0xF];
+    return tag;
 }
 
 // What a player actually scans for: the clothing, not the pose or the face

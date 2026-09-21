@@ -1,0 +1,16 @@
+{
+  "consumed_by": "tools/od checkRecognise()",
+  "documented_in": "docs/interfaces/recognition.md",
+  "fields": {
+    "attempts": "int, retries per object; vision models are not deterministic",
+    "fallback": "string, used only if model is not pulled",
+    "model": "string, ollama model name",
+    "objects[].accept": "[]string, any one of these in the description passes",
+    "objects[].name": "string, must match the order build/propsheet writes",
+    "prompt": "string, asks for a description rather than one word"
+  },
+  "images_from": "build/propsheet -\u003e artifacts/props/*.png",
+  "interface": "recognition",
+  "judged_by": "a local vision model over the Ollama API",
+  "produced_by": "ci/recognition.yaml"
+}

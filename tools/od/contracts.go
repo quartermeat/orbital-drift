@@ -111,6 +111,25 @@ func goFixtures(dir string) error {
 		return err
 	}
 
+	if err := writeFixture(filepath.Join(dir, "recognition.json"), map[string]any{
+		"interface":     "recognition",
+		"produced_by":   "ci/recognition.yaml",
+		"consumed_by":   "tools/od checkRecognise()",
+		"documented_in": "docs/interfaces/recognition.md",
+		"images_from":   "build/propsheet -> artifacts/props/*.png",
+		"judged_by":     "a local vision model over the Ollama API",
+		"fields": map[string]string{
+			"model":            "string, ollama model name",
+			"fallback":         "string, used only if model is not pulled",
+			"prompt":           "string, asks for a description rather than one word",
+			"attempts":         "int, retries per object; vision models are not deterministic",
+			"objects[].name":   "string, must match the order build/propsheet writes",
+			"objects[].accept": "[]string, any one of these in the description passes",
+		},
+	}); err != nil {
+		return err
+	}
+
 	return writeFixture(filepath.Join(dir, "pipeline.json"), map[string]any{
 		"interface":     "pipeline",
 		"produced_by":   "ci/pipeline.yaml",

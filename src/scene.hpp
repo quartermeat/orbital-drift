@@ -10,6 +10,7 @@
 #include "mixer.hpp"
 #include "hotreload.hpp"
 #include "person.hpp"
+#include "prop.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -18,14 +19,6 @@ namespace orbital {
 
 inline constexpr int SceneWidth = 2560, SceneHeight = 1440;
 inline constexpr int PaletteSize = 6;
-
-inline Rgb shade(Rgb base, float gain, float mix, Rgb toward) {
-    auto blend = [&](unsigned char channel, unsigned char other) {
-        float value = channel * gain * (1 - mix) + other * mix;
-        return static_cast<unsigned char>(std::clamp(value, 0.f, 255.f));
-    };
-    return {blend(base.r, toward.r), blend(base.g, toward.g), blend(base.b, toward.b)};
-}
 
 inline std::array<Rgb, PaletteSize> buildPalette(Rgb base) {
     return {base,
@@ -123,6 +116,30 @@ inline const char* skitName(SkitKind kind) {
         default: return "stroll";
     }
 }
+// Which prop belongs with which vignette. A skit is a reason for people to be
+// somewhere, and the prop is usually that reason: a queue needs something to
+// queue for.
+inline PropKind propFor(SkitKind kind, Rng& rng) {
+    switch (kind) {
+        case SkitKind::Queue:    { static const PropKind any[] = {PropKind::Stall, PropKind::Well, PropKind::Cart};
+                                   return any[rng.below(3)]; }
+        case SkitKind::Ring:     { static const PropKind any[] = {PropKind::Fire, PropKind::Fountain, PropKind::Well};
+                                   return any[rng.below(3)]; }
+        case SkitKind::Chase:    { static const PropKind any[] = {PropKind::Cart, PropKind::Signpost, PropKind::Bench};
+                                   return any[rng.below(3)]; }
+        case SkitKind::Pair:     { static const PropKind any[] = {PropKind::Bench, PropKind::Signpost, PropKind::Well};
+                                   return any[rng.below(3)]; }
+        case SkitKind::Audience: { static const PropKind any[] = {PropKind::Stage, PropKind::Fire, PropKind::Stall};
+                                   return any[rng.below(3)]; }
+        case SkitKind::Picnic:   { static const PropKind any[] = {PropKind::Blanket, PropKind::Fire, PropKind::Boat};
+                                   return any[rng.below(3)]; }
+        case SkitKind::Work:     { static const PropKind any[] = {PropKind::Haystack, PropKind::Cart, PropKind::Well};
+                                   return any[rng.below(3)]; }
+        default:                 { static const PropKind any[] = {PropKind::Signpost, PropKind::Tent, PropKind::Bench};
+                                   return any[rng.below(3)]; }
+    }
+}
+
 struct Skit {
     SkitKind kind;
     float x, y;
@@ -130,6 +147,7 @@ struct Skit {
     uint32_t hides = 0;    // none of these may be
     unsigned char primary; // the track it belongs to first
     int members;
+    int prop = -1;   // every skit has one; index into Scene::props
     float minX = 0, minY = 0, maxX = 0, maxY = 0;   // where its people actually ended up
     bool showing(uint32_t playing) const { return (playing & wants) == wants && (playing & hides) == 0; }
 };
@@ -145,6 +163,7 @@ struct Scene {
     std::vector<Marker> markers;
     std::vector<PersonSpot> people;
     std::vector<Skit> skits;
+    std::vector<Prop> props;
     int target = -1;   // the person the find box shows; always in this world's own layer
     bool found = false;
 };
@@ -428,9 +447,25 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
                     break;
                 }
             }
-            if (placed > 0)
+            if (placed > 0) {
+                // Every skit gets its object. A queue with nothing to queue
+                // for is just a line of people.
+                Prop prop{};
+                prop.kind = propFor(kind, crowd);
+                prop.size = crowd.range(26.f, 40.f) * propScale(prop.kind);
+                prop.spin = crowd.range(-.12f, .12f);
+                prop.palette = static_cast<unsigned char>(crowd.below(PaletteSize));
+                // Set a little back from the group so it is not buried in them.
+                prop.x = anchor.x - dx * step * 1.15f;
+                prop.y = anchor.y - dy * step * 1.15f;
+                if (elevationAt(scene.seed, prop.x, prop.y) < SeaLevel + .015f) {
+                    prop.x = anchor.x; prop.y = anchor.y;
+                }
                 scene.skits.push_back({kind, anchor.x, anchor.y, wants, hides,
-                                       static_cast<unsigned char>(layer), placed});
+                                       static_cast<unsigned char>(layer), placed,
+                                       int(scene.props.size())});
+                scene.props.push_back(prop);
+            }
         }
     }
 

@@ -153,6 +153,21 @@ towns — and `bakeScene` draws it once into a 2560x1440 render texture. After
 that the view is only ever panning and zooming an image, with zoom bounded
 between fitting the frame and 9x.
 
+**Every skit has an object**, and the object has to be recognisable. A queue
+with nothing to queue for is just a line of people. `make props` renders each
+one alone and `od recognise` asks a local vision model to describe it, looking
+for any accepted word from `ci/recognition.yaml`. That test exists to keep the
+drawings honest: a silhouette only its author can name is a shape, not an
+object. See [docs/interfaces/recognition.md](docs/interfaces/recognition.md);
+the judge matters, so the model is configurable.
+
+**A figure's identity is `figureId()`** — every garment, colour, pattern and
+pose folded into one number, printed as `FIG-XXXX`. Two figures with the same
+id are the same Waldo. This is stricter than `sameOutfit`, and both are needed:
+the id is exact appearance, `sameOutfit` is what a player can actually tell
+apart in a crowd, which ignores pose and skin because at forty pixels they do
+not separate two people in the same clothes.
+
 **Nobody stands alone.** Every person belongs to a *skit* -- a queue, a ring
 of talkers, a chase, a pair, an audience round a performer, a picnic, a work
 gang, or a stroll. A lone wanderer is a Stroll of one, so the rule has no

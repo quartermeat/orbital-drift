@@ -3,7 +3,7 @@ RAYLIB := build/deps/raylib-5.5/src
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
 LDLIBS := $(RAYLIB)/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
 
-.PHONY: all setup run test check clean figures ci od worlds contracts interfaces
+.PHONY: all setup run test check clean figures ci od worlds contracts interfaces props recognise
 all: build/orbital-drift build/contracts
 setup:
 	python3 scripts/setup.py
@@ -47,6 +47,14 @@ check: test all
 	./build/orbital-drift --check-assets
 run: all
 	./build/orbital-drift
+build/propsheet: tools/propsheet.cpp src/propdraw.hpp src/prop.hpp src/figure.hpp $(RAYLIB)/libraylib.a
+	mkdir -p build artifacts/props
+	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) $< -o $@ $(LDLIBS)
+props: build/propsheet
+	./build/propsheet artifacts/props
+# Ask a local vision model whether each object reads as what it is meant to be.
+recognise: props tools/od/od
+	tools/od/od recognise
 build/contracts: tools/contracts.cpp src/campaign.hpp src/scene.hpp src/progress.hpp src/person.hpp
 	mkdir -p build testdata/interfaces
 	$(CXX) $(CXXFLAGS) -Isrc $< -o $@

@@ -3,7 +3,7 @@
   "produced_by": "src/scene.hpp generateScene()",
   "consumed_by": "src/main.cpp visibility + dev overlay",
   "documented_in": "docs/interfaces/skit.md",
-  "sizeof": 44,
+  "sizeof": 48,
   "fields": {
     "kind": "Queue|Ring|Chase|Pair|Audience|Picnic|Work|Stroll",
     "wants": "track bitmask, all must sound",
@@ -14,10 +14,10 @@
   },
   "example": {
     "kinds": 8,
-    "total": 405,
-    "want_one_track": 288,
-    "want_two_tracks": 117,
-    "need_a_track_muted": 40,
+    "total": 406,
+    "want_one_track": 276,
+    "want_two_tracks": 130,
+    "need_a_track_muted": 32,
     "showing_rule": "(playing & wants) == wants && (playing & hides) == 0"
   }
 }

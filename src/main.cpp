@@ -4,6 +4,7 @@
 #include "progress.hpp"
 #include "scene.hpp"
 #include "figure.hpp"
+#include "propdraw.hpp"
 #include "raylib.h"
 #include "raymath.h"   // must follow raylib.h: it uses raylib's vector types
 #include "rlgl.h"
@@ -147,7 +148,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.19.1\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.20.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -203,7 +204,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.19.1\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.20.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -571,6 +572,23 @@ int main(int argc,char** argv) {
                 }
                 int drawnPeople=0,layersOn=0;
                 for(int i=0;i<campaign.count();++i)layersOn+=(mixer.enabled>>i)&1u;
+                for(size_t i=0;i<scene.skits.size();++i) {
+                    if(!showing[i]||scene.skits[i].prop<0)continue;
+                    const Prop& prop=scene.props[size_t(scene.skits[i].prop)];
+                    float ph=float(prop.size*viewScale);
+                    if(ph<2.f)continue;
+                    double px2=screenX(prop.x),py2=screenY(prop.y);
+                    if(px2<-ph*2||py2<-ph*2||px2>w+ph*2||py2>h+ph*2)continue;
+                    // Below this an object is a smudge; drawing a dozen shapes for
+                    // it costs frames and reads as nothing.
+                    if(ph<14.f) {
+                        DrawRectangleRec({float(px2-ph*.3),float(py2-ph*.6),
+                                          std::max(1.f,ph*.6f),std::max(1.f,ph*.6f)},
+                                         toColor(scene.palette[prop.palette]));
+                        continue;
+                    }
+                    drawProp(prop,{float(px2),float(py2)},ph,scene.palette[prop.palette]);
+                }
                 for(const PersonSpot& spot:scene.people) {
                     // A vignette exists only while its configuration is met.
                     if(!showing[size_t(spot.skit)])continue;
