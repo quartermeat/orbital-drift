@@ -24,6 +24,9 @@ int main() {
         require(real.tracks[0].colour.r==0xaf,"colours are read as hex");
         require(real.allMask()==0x7f,"seven tracks make a seven-bit mask");
         require(real.nthUnlock(0)==6&&real.nthUnlock(6)==0,"right-to-left opens the last track first");
+        require(real.seed!=0,"a campaign always has a world seed");
+        require(loadCampaign("campaigns/three-signals.conf").seed!=real.seed,
+                "two campaigns never share a world seed, or they share islands");
 
         // A campaign with a different shape, which is the whole point.
         auto three=write("od-three.conf",

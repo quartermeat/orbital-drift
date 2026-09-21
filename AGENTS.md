@@ -109,10 +109,17 @@ unlock direction, and every track's name, file, role and colour. A second
 project is a second config file, not a second build. `--campaign file.conf`
 picks one; the default is `campaigns/orbital-drift.conf`.
 
-`campaigns/three-signals.conf` is a deliberately different shape -- three
-tracks, unlocking left to right -- kept as living proof that the count and
-direction really are per campaign. Run it if you touch any of this.
+`campaigns/three-signals.conf` is a **test fixture, not content**: three
+tracks unlocking left to right over a subset of the same stems, kept as living
+proof that count and direction really are per campaign. There is still only
+one real campaign, because there is only one Bitwig project. A genuine second
+one needs its own stems -- which is what `bitwig-session-builder` exists to
+produce.
 
+- **Worlds are seeded from the campaign as well as the track.** Seeding from
+  the track index alone made every campaign generate the same islands in
+  different colours. `Campaign::seed` comes from the title, or from an explicit
+  `seed =` in the config.
 - **Nothing about a specific project may be hardcoded again.** `MaxTracks` is a
   compile-time ceiling for array sizing only; the real count is
   `Mixer::trackCount` / `Campaign::count()`, and the unlock direction lives in

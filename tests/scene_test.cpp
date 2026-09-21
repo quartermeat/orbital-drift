@@ -69,6 +69,11 @@ int main() {
         }
         require(places.size()==size_t(7),"every world has its own layout");
 
+        // Two campaigns must not generate the same island in different colours.
+        Scene one=generateScene(0,color,7,1111), two=generateScene(0,color,7,2222);
+        require(one.towns[0].x!=two.towns[0].x||one.towns[0].y!=two.towns[0].y,
+                "the campaign seed changes the land, not just the palette");
+
         std::cout<<"PASS: determinism, towns/roads/woods/fields, unique target outfit, all on land, distinct worlds\n";
         return 0;
     } catch (const std::exception& error) {

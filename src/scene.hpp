@@ -112,9 +112,11 @@ struct Scene {
     bool found = false;
 };
 
-inline Scene generateScene(int track, Rgb trackColor, int layerCount) {
+inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t campaignSeed = 0) {
     Scene scene;
-    scene.seed = uint64_t(track) * 7919u + 1013904223u;
+    uint64_t mixed = (campaignSeed ? campaignSeed : 1013904223ull) ^ (uint64_t(track + 1) * 0x9E3779B97F4A7C15ull);
+    mixed ^= mixed >> 29; mixed *= 0xBF58476D1CE4E5B9ull; mixed ^= mixed >> 32;
+    scene.seed = mixed;
     scene.palette = buildPalette(trackColor);
     // Terrain stays naturalistic but takes a tint from the track, so the seven
     // worlds read as different places rather than recolours of one.

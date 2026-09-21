@@ -72,6 +72,11 @@ work.
 
 ### Still open
 
+- **There is only one campaign, because there is only one Bitwig project.**
+  `three-signals.conf` is a fixture over the same stems, not content. A real
+  second campaign needs a second project: new stems from
+  `bitwig-session-builder`, then a `.conf` pointing at them. The code side is
+  done; the music is the missing half.
 - **No campaign menu.** `--campaign` picks one; choosing another from inside
   the game does not exist yet. Saves are per campaign, so they no longer bleed.
 - **Nothing marks a campaign as done** beyond the finale being reachable.

@@ -25,6 +25,7 @@ struct Campaign {
     std::string title = "Untitled", subtitle, musicalKey = "A MINOR", stems = "audio";
     int tempo = 72, bars = 16;
     bool rightToLeft = true;   // which end of the track list opens first
+    uint64_t seed = 0;         // makes this campaign's worlds its own
     std::vector<CampaignTrack> tracks;
     std::string note;          // parse warning, empty when clean
 
@@ -82,6 +83,17 @@ inline Campaign loadCampaign(const fs::path& path) {
     campaign.tempo = std::clamp(number("tempo", 72), 20, 400);
     campaign.bars = std::clamp(number("bars", 16), 1, 512);
     campaign.rightToLeft = text("unlock", "right-to-left") != "left-to-right";
+    // Worlds are seeded from the campaign as well as the track, or every
+    // campaign would generate the same islands in different colours.
+    auto seedFound = values.find("seed");
+    if (seedFound != values.end()) {
+        try { campaign.seed = std::stoull(seedFound->second); } catch (...) { ++bad; }
+    }
+    if (!campaign.seed) {
+        uint64_t hash = 1469598103934665603ull;
+        for (char ch : campaign.title) { hash ^= uint64_t((unsigned char)ch); hash *= 1099511628211ull; }
+        campaign.seed = hash | 1ull;
+    }
 
     // Tracks are numbered from 1 and must be contiguous: a gap means a typo,
     // and silently skipping it would drop a stem from the mix.
