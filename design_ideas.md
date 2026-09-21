@@ -17,6 +17,67 @@ This is why the Bitwig interfacing matters, and it's worth protecting as the
 project's spine. Anything that requires authoring levels outside Bitwig is
 working against it.
 
+## The game loop, as it actually stands
+
+One campaign is one Bitwig project. Its N tracks are N worlds, and the run is
+**N−1 finds**, because you begin with one track already open.
+
+**1. Boot.** The campaign config is read — title, tempo, key, bars, stems,
+unlock direction, and every track's name, file, role and colour. The stems load
+behind one shared playhead. The run **begins in silence** with one track
+unlocked; every other track is sealed, its name hidden.
+
+**2. Galaxy.** Wake the open track. Its orbit lights, and a sigil appears on it
+— a doorway, never a shortcut. Click the orbit (or the sigil, or `Z`).
+
+**3. World.** You descend into that track's island. The find box shows one
+specific person, drawn exactly as they appear at full zoom. Pan and zoom the
+map and look for them. Nobody else in any layer wears that outfit.
+
+**4. Find.** Left-click them. The next track unseals, **starts playing**, and
+you are returned to the galaxy to hear what arrived.
+
+**5. The catch.** Every world holds one crowd per track, and a crowd only
+exists while its track plays. So the world you just searched now has people in
+it you never saw, and the next world opens already busier.
+
+**6. Repeat** until the last track unseals, which opens the finale: a ring per
+track, each breathing on its own level. `Esc` returns to the galaxy, `V`
+reopens it.
+
+### The difficulty curve is the music
+
+Nobody authored it. Each layer is roughly 140–190 people, so the crowd you
+search grows with the mix:
+
+| Find | Layers playing | People to search |
+| --- | --- | --- |
+| 1st | 1 | ~140 |
+| 2nd | 2 | ~350 |
+| 3rd | 3 | ~500 |
+| 4th | 4 | ~660 |
+| 5th | 5 | ~820 |
+| 6th | 6 | ~980 |
+
+The run gets harder because the music gets fuller. That is the thesis paying
+off without being designed twice.
+
+### The last world
+
+For a seven-track campaign the sixth find completes the run, so the last track's
+world is never required. It unlocks, generates, and stays open with all seven
+layers showing — the busiest board in the campaign, with a target whose find
+unlocks nothing. It is kept deliberately, for easter eggs and future campaign
+work.
+
+### Still open
+
+- **No campaign menu.** `--campaign` picks one; choosing another from inside
+  the game does not exist yet. Saves are per campaign, so they no longer bleed.
+- **Nothing marks a campaign as done** beyond the finale being reachable.
+- **Finding in the bonus world** says "found them" and quietly does nothing,
+  which will read as a bug to anyone who tries it.
+
 ## Core mechanic
 
 Seven tracks, seven toggles, seven visual layers. State is a 7-bit word — 128

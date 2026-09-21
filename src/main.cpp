@@ -97,7 +97,7 @@ struct Options {
     fs::path state=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"state.json";
     fs::path capture;
     fs::path campaignFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"campaigns"/"orbital-drift.conf";
-    fs::path progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"/"progress.json";
+    fs::path progressFile;   // set once the campaign is known: one save per campaign
     bool windowed=false,check=false,resume=false,gallery=false,dev=false;
     int world=-1;
     double captureAfter=2;
@@ -126,7 +126,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.13.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.13.1\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -182,7 +182,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.13.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.13.1\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -227,6 +227,10 @@ int main(int argc,char** argv) {
             throw std::runtime_error("Missing graphics assets; run python3 scripts/setup.py");
         // State is saved every run, but a launch starts over unless --resume
         // asks for the previous one; resuming matters later, not yet.
+        // One save per campaign: resuming a seven-track run into a three-track
+        // campaign used to clamp straight to complete.
+        options.progressFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"artifacts"
+                             /("progress-"+options.campaignFile.stem().string()+".json");
         progress=options.resume?loadProgress(options.progressFile,campaign.count(),campaign.rightToLeft):Progress{};
         progress.count=campaign.count();progress.rightToLeft=campaign.rightToLeft;
         saveProgress(options.progressFile,progress);
