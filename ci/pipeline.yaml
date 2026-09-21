@@ -39,6 +39,8 @@ stages:
         run: tools/od/od campaigns
       - name: interfaces
         run: tools/od/od interfaces
+      - name: dependencies
+        run: tools/od/od deps
 
   - name: live
     parallel: false         # every one of these opens a window

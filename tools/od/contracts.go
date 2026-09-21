@@ -86,6 +86,31 @@ func goFixtures(dir string) error {
 		"stages[].steps[].name": "string",
 		"stages[].steps[].run":  "shell, run from the repo root with DISPLAY set",
 	}
+	budgetShape := map[string]string{
+		"limits.go_modules":  "int, maximum modules linked into tools/od",
+		"limits.native":      "int, maximum native libraries linked into the game",
+		"go[].module":        "string, module path as `go list -deps` reports it",
+		"go[].version":       "string",
+		"go[].lines":         "int, non-test source lines carried",
+		"go[].why":           "string, required; a dependency with no reason fails",
+		"native[].name":      "string",
+		"native[].version":   "string",
+		"native[].why":       "string",
+		"native[].vendored":  "path",
+		"native[].fetched_by": "path",
+		"native[].pinned":    "string, required; an unpinned native library fails",
+	}
+	if err := writeFixture(filepath.Join(dir, "dependencies.json"), map[string]any{
+		"interface":     "dependencies",
+		"produced_by":   "ci/dependencies.yaml",
+		"consumed_by":   "tools/od checkDeps()",
+		"documented_in": "docs/interfaces/dependencies.md",
+		"checked_by":    "go list -deps, filtered by Go's rule that stdlib paths have no dot in the first element",
+		"fields":        budgetShape,
+	}); err != nil {
+		return err
+	}
+
 	return writeFixture(filepath.Join(dir, "pipeline.json"), map[string]any{
 		"interface":     "pipeline",
 		"produced_by":   "ci/pipeline.yaml",

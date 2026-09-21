@@ -19,6 +19,7 @@ obvious.
 | [skit](skit.md) | generator → visibility + dev overlay | `testdata/interfaces/skit.json` |
 | [state](state.md) | C++ → Go tooling | `testdata/interfaces/state.json` |
 | [pipeline](pipeline.md) | `ci/pipeline.yaml` → Go runner | `testdata/interfaces/pipeline.json` |
+| [dependencies](dependencies.md) | `ci/dependencies.yaml` → Go runner | `testdata/interfaces/dependencies.json` |
 
 `sizeof` is recorded for every C++ struct on purpose. C++ has no reflection,
 so a field added without updating `tools/contracts.cpp` would otherwise pass

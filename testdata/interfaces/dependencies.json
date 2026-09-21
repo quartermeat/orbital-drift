@@ -1,0 +1,21 @@
+{
+  "checked_by": "go list -deps, filtered by Go's rule that stdlib paths have no dot in the first element",
+  "consumed_by": "tools/od checkDeps()",
+  "documented_in": "docs/interfaces/dependencies.md",
+  "fields": {
+    "go[].lines": "int, non-test source lines carried",
+    "go[].module": "string, module path as `go list -deps` reports it",
+    "go[].version": "string",
+    "go[].why": "string, required; a dependency with no reason fails",
+    "limits.go_modules": "int, maximum modules linked into tools/od",
+    "limits.native": "int, maximum native libraries linked into the game",
+    "native[].fetched_by": "path",
+    "native[].name": "string",
+    "native[].pinned": "string, required; an unpinned native library fails",
+    "native[].vendored": "path",
+    "native[].version": "string",
+    "native[].why": "string"
+  },
+  "interface": "dependencies",
+  "produced_by": "ci/dependencies.yaml"
+}

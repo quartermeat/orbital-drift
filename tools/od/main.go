@@ -15,6 +15,7 @@ func usage() {
   od ci [pipeline.yaml]   run the whole pipeline (this is the one to run)
   od check <name>         one live check: controls | hot-reload | progression | find | revisit
   od interfaces [--write] check every layer interface against its fixture and doc
+  od deps                 check the dependency budget in ci/dependencies.yaml
   od campaigns            parse every campaigns/*.conf and report
   od worlds               save a PNG of every world background
   od shot -world N -zoom K [-dev] -out f.png   capture one world at a zoom`)
@@ -55,6 +56,8 @@ func main() {
 		}
 	case "interfaces":
 		os.Exit(checkInterfaces(root, len(os.Args) > 2 && os.Args[2] == "--write"))
+	case "deps":
+		os.Exit(checkDeps(root))
 	case "campaigns":
 		os.Exit(checkCampaigns(root))
 	case "shot":

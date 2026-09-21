@@ -1,0 +1,35 @@
+# Every third-party dependency, and the reason it earns its place.
+#
+# `od deps` fails if anything links that is not listed here, or if a count
+# exceeds its limit. Adding a dependency means adding it here first, with a
+# reason someone can argue with.
+
+limits:
+  go_modules: 1     # things linked into tools/od
+  native: 1         # things linked into the game
+
+go:
+  - module: gopkg.in/yaml.v3
+    version: v3.0.1
+    lines: 11285
+    why: >
+      The pipeline is YAML on purpose, and hand-rolled YAML means owning
+      indentation, quoting and escaping bugs. No transitive runtime
+      dependencies; gopkg.in/check.v1 appears in go.sum as its test
+      dependency and is never linked.
+
+native:
+  - name: raylib
+    version: "5.5"
+    why: >
+      Window, OpenGL context, audio device and input. The one thing the game
+      could not reasonably do itself.
+    vendored: build/deps/raylib-5.5
+    fetched_by: scripts/setup.py
+    pinned: sha256:aea98ecf5bc5c5e0b789a76de0083a21a70457050ea4cc2aec7566935f5e258e
+
+# Deliberately absent, and worth keeping absent:
+#   - a JSON library: the app writes its own state, the tooling uses encoding/json
+#   - a test framework: the checks are plain programs that print PASS or FAIL
+#   - an audio library beyond raylib: the mixer is ours, which is the point
+#   - numpy/scipy: they belong to bitwig-session-builder, not here

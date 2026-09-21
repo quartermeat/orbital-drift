@@ -444,6 +444,23 @@ that happens: `make interfaces`, then edit the document, then commit both.
 - The two cross-language boundaries, `state` and `pipeline`, matter most:
   nothing but this check couples the C++ and the Go.
 
+## Dependencies
+
+**One Go module and one native library.** `ci/dependencies.yaml` lists every
+third-party thing that links, with a reason, and `od deps` fails if anything
+links that is not listed, if anything listed no longer links, if a count
+exceeds its limit, or if a native library is not checksum-pinned.
+
+- `gopkg.in/yaml.v3` — the pipeline is YAML on purpose, and hand-rolled YAML
+  means owning indentation, quoting and escaping bugs. No transitive runtime
+  dependencies.
+- raylib 5.5 — window, GL context, audio device, input. Vendored and pinned.
+
+Adding one means adding it to the config first, with a reason someone can
+argue with. Deliberately absent and worth keeping absent: a JSON library, a
+test framework, and any audio library beyond raylib — the mixer being ours is
+the point.
+
 ## Versioning and pushing
 
 Home guide rule applies: every commit advances `MAJOR.MINOR.PATCH` in `VERSION`,
