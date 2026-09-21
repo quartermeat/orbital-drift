@@ -233,12 +233,17 @@ Rules:
   PRNG, so a world is identical every run and on every machine, and the layout
   is unit-testable without a window.
 - `--dev` adds `G`, which jumps the view onto the target at full zoom, and
-  boxes **every** person in the colour of the track whose layer they belong to,
-  with the target's box outlined white and red. The boxes are the real
-  `personHitBox`, not an approximation, so the overlay shows what the game
-  actually tests against. Use `DrawRectangleLines`, not the `Ex` form: four
-  quads per box costs 17 fps at a thousand people. It is the only cheat; keep
-  it behind the flag.
+  outlines **each skit** around the people actually in it, coloured by the
+  blend of the tracks its configuration wants — so which mix a vignette belongs
+  to is readable at a glance. A skit that needs a track *muted* carries a small
+  square in that track's colour. The target keeps its own white-and-red box.
+  Per-figure boxes were tried and removed: at a thousand people they were noise
+  rather than signal.
+- Skit bounds come from the people, never the anchor. The anchor is where a
+  skit was aimed, not where it landed, and including it inflates every outline.
+- Averaged pastel track colours drift to grey, so the mix is lifted clear of
+  the terrain. Use `DrawRectangleLines`, not the `Ex` form: four quads per box
+  costs real frames at this count.
 - **The hit box extends past the feet.** A person's ground point is where the
   eye says they are, so clicking their feet or shadow has to count; a box that
   stops at the feet misses the most natural click by a pixel.
@@ -400,6 +405,12 @@ revisit when arbitrary projects load.
 - **Live checks never run in parallel.** Two windows named "Orbital Drift"
   fight over focus and xdotool sends input to the wrong one. Unit and asset
   stages are parallel because they are headless.
+- **Live checks need an idle desktop.** The driver verifies it actually holds
+  focus before every input rather than trusting `windowactivate`, and reports
+  `ENVIRONMENT:` with the name of the window that stole it. Typing in another
+  window while `make ci` runs will stop the live stage — that is the harness
+  being honest, not a product failure. Assertions after focus is lost are
+  suppressed, because they are consequences rather than findings.
 - **Park the pointer before sending keys.** `xdotool --clearmodifiers` can
   restore a held button as a synthesized click, so a pointer left over an orbit
   node turns the next keystroke into a descent. `Launch` parks it.

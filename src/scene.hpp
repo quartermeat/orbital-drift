@@ -128,8 +128,9 @@ struct Skit {
     float x, y;
     uint32_t wants = 0;    // every one of these tracks must be sounding
     uint32_t hides = 0;    // none of these may be
-    unsigned char primary; // the track it belongs to first, used for colour
+    unsigned char primary; // the track it belongs to first
     int members;
+    float minX = 0, minY = 0, maxX = 0, maxY = 0;   // where its people actually ended up
     bool showing(uint32_t playing) const { return (playing & wants) == wants && (playing & hides) == 0; }
 };
 
@@ -476,6 +477,26 @@ inline Scene generateScene(int track, Rgb trackColor, int layerCount, uint64_t c
         }
     }
 
+    // Skit bounds last of all, so they include the nudge above. Taken from the
+    // people only: the anchor is where a skit was aimed, not where it landed,
+    // and including it inflates every outline.
+    std::vector<bool> started(scene.skits.size(), false);
+    for (const PersonSpot& spot : scene.people) {
+        Skit& skit = scene.skits[size_t(spot.skit)];
+        if (!started[size_t(spot.skit)]) {
+            started[size_t(spot.skit)] = true;
+            skit.minX = skit.maxX = spot.x;
+            skit.minY = spot.y - spot.height;
+            skit.maxY = spot.y;
+        }
+    }
+    for (const PersonSpot& spot : scene.people) {
+        Skit& skit = scene.skits[size_t(spot.skit)];
+        skit.minX = std::min(skit.minX, spot.x);
+        skit.maxX = std::max(skit.maxX, spot.x);
+        skit.minY = std::min(skit.minY, spot.y - spot.height);
+        skit.maxY = std::max(skit.maxY, spot.y);
+    }
     return scene;
 }
 

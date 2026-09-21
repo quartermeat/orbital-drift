@@ -80,6 +80,19 @@ static const char* trackName(int i) { return campaign.tracks[size_t(i)].name.c_s
 // A person's clickable box: from the head down past the feet, never smaller
 // than a comfortable click. The dev overlay draws this same rectangle, so what
 // it shows is what the game actually tests against.
+// A configuration's colour: the track colours it asks for, mixed. A skit that
+// wants two tracks reads as the blend of both, so which mix a vignette belongs
+// to is visible at a glance.
+static Color configColour(uint32_t wants) {
+    int total=0,r=0,g=0,b=0;
+    for(int i=0;i<MaxTracks;++i)
+        if((wants>>i)&1u){r+=Colors[i].r;g+=Colors[i].g;b+=Colors[i].b;++total;}
+    if(!total)return Color{200,200,200,255};
+    // Averaging pastel track colours desaturates toward grey, so lift the mix
+    // clear of the terrain it is drawn over.
+    auto lift=[&](int v){return (unsigned char)std::clamp(int(v/total)*5/4+28,0,255);};
+    return Color{lift(r),lift(g),lift(b),255};
+}
 static Rectangle personHitBox(double screenX,double screenY,double pixels) {
     float width=std::max(18.f,float(pixels)*.62f),height=std::max(20.f,float(pixels));
     return {float(screenX)-width*.5f,float(screenY)-height,width,height*1.18f};
@@ -134,7 +147,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.18.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.18.1\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -190,7 +203,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.18.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.18.1\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -570,14 +583,6 @@ int main(int argc,char** argv) {
                         DrawRectangleRec({float(sx-px*.22),float(sy-px*.75),
                                           std::max(1.f,px*.44f),std::max(1.f,px*.8f)},
                                          toColor(ClothTones[spot.figure.shirt]));
-                        if(options.dev) {
-                            // DrawRectangleLines batches as lines; the Ex form is
-                            // four quads per box and costs real frames at a
-                            // thousand people.
-                            Rectangle box=personHitBox(sx,sy,px);
-                            DrawRectangleLines(int(box.x),int(box.y),int(box.width),int(box.height),
-                                               Fade(Colors[spot.layer],.55f));
-                        }
                         continue;
                     }
                     drawFigure(spot.figure,{float(sx),float(sy)},px);
@@ -589,13 +594,30 @@ int main(int argc,char** argv) {
                     }
                     // Dev: every person boxed in the colour of the track whose
                     // layer they belong to, matching that track's card.
-                    if(options.dev) {
-                        Rectangle box=personHitBox(sx,sy,px);
-                        DrawRectangleLines(int(box.x),int(box.y),int(box.width),int(box.height),
-                                           Fade(Colors[spot.layer],.7f));
-                    }
                 }
 
+                if(options.dev) {
+                    for(size_t i=0;i<scene.skits.size();++i) {
+                        if(!showing[i])continue;
+                        const Skit& skit=scene.skits[i];
+                        float margin2=9.f*float(viewScale);
+                        float x0=float(screenX(skit.minX))-margin2,y0=float(screenY(skit.minY))-margin2;
+                        float x1=float(screenX(skit.maxX))+margin2,y1=float(screenY(skit.maxY))+margin2;
+                        if(x1<0||y1<0||x0>w||y0>h)continue;
+                        Color tone=configColour(skit.wants);
+                        DrawRectangleLines(int(x0),int(y0),int(x1-x0),int(y1-y0),Fade(tone,.8f));
+                        // A skit that needs something muted is marked with the
+                        // colour of the track it needs silent.
+                        if(skit.hides) {
+                            for(int t=0;t<campaign.count();++t)
+                                if((skit.hides>>t)&1u) {
+                                    DrawRectangleRec({x0,y0,7*u,7*u},Colors[t]);
+                                    DrawRectangleLines(int(x0),int(y0),int(7*u),int(7*u),{18,22,30,255});
+                                    break;
+                                }
+                        }
+                    }
+                }
                 float pad=38*u;
                 Color want=toColor(scene.palette[0]);   // the track's own colour, used for the find box trim
                 if(scene.found) {
@@ -651,7 +673,7 @@ int main(int argc,char** argv) {
                         <<"    "<<layersOn<<"/"<<campaign.count()<<" TRACKS    "
                         <<skitsShowing<<"/"<<scene.skits.size()<<" SKITS    "
                         <<drawnPeople<<" IN VIEW";
-                if(options.dev)zoomText<<"    BOXES = LAYER COLOUR";
+                if(options.dev)zoomText<<"    OUTLINES = SKIT, COLOUR = ITS TRACK MIX";
                 text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {
                     float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);

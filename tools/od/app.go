@@ -75,6 +75,7 @@ type App struct {
 	statePath string
 	logPath   string
 	window    string
+	lostFocus bool
 	Width     int
 	Height    int
 	failures  []string
@@ -91,7 +92,9 @@ func xdoOut(args ...string) (string, error) {
 // same name silently steals every keystroke.
 func killStrays() {
 	_ = exec.Command("pkill", "-f", "build/orbital-drift").Run()
-	time.Sleep(600 * time.Millisecond)
+	// A dying window can still hold focus for a moment, and whoever holds it
+	// receives the next keystroke.
+	time.Sleep(1100 * time.Millisecond)
 }
 
 func Launch(root, name string, args ...string) (*App, error) {
@@ -128,7 +131,7 @@ func Launch(root, name string, args ...string) (*App, error) {
 		app.Close()
 		return nil, fmt.Errorf("window never appeared (see %s)", app.logPath)
 	}
-	_ = xdo("windowactivate", "--sync", app.window, "windowfocus", "--sync", app.window)
+	app.focus()
 	time.Sleep(600 * time.Millisecond) // settle focus before the first input
 	geometry, _ := xdoOut("getwindowgeometry", "--shell", app.window)
 	for _, line := range strings.Split(geometry, "\n") {
@@ -169,17 +172,45 @@ func (a *App) Alive() bool {
 	return a.cmd.Process.Signal(syscall.Signal(0)) == nil
 }
 
+// focus insists rather than asks. windowactivate can return before the window
+// manager has moved focus, and input then goes wherever focus actually is --
+// which is how a live check fails for reasons that have nothing to do with the
+// product. Verified, not assumed.
+func (a *App) focus() bool {
+	if a.lostFocus {
+		return false
+	}
+	for attempt := 0; attempt < 12; attempt++ {
+		_ = xdo("windowraise", a.window)
+		_ = xdo("windowactivate", "--sync", a.window, "windowfocus", "--sync", a.window)
+		if held, err := xdoOut("getwindowfocus"); err == nil && held == a.window {
+			return true
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	// Someone is using the desktop. That is not a product failure, and pressing
+	// on would produce assertions about input that never arrived.
+	name, _ := xdoOut("getwindowfocus", "getwindowname")
+	a.lostFocus = true
+	a.Fail("ENVIRONMENT: could not take focus, %q is holding it -- live checks need an idle desktop", name)
+	return false
+}
+
 func (a *App) Key(name string) {
-	_ = xdo("windowactivate", "--sync", a.window, "windowfocus", "--sync", a.window,
-		"keydown", "--clearmodifiers", name)
+	if !a.focus() {
+		return
+	}
+	_ = xdo("keydown", "--clearmodifiers", name)
 	time.Sleep(keyHold)
 	_ = xdo("keyup", name)
 	time.Sleep(settle)
 }
 
 func (a *App) Move(x, y int) {
-	_ = xdo("windowactivate", "--sync", a.window,
-		"mousemove", "--window", a.window, strconv.Itoa(x), strconv.Itoa(y))
+	if !a.focus() {
+		return
+	}
+	_ = xdo("mousemove", "--window", a.window, strconv.Itoa(x), strconv.Itoa(y))
 	time.Sleep(200 * time.Millisecond)
 }
 
@@ -242,6 +273,9 @@ func (a *App) Require(ok bool, format string, args ...any) {
 
 // Report prints the outcome the pipeline reads: one PASS line, or the reasons.
 func (a *App) Report(pass string) int {
+	if a.lostFocus && len(a.failures) > 1 {
+		a.failures = a.failures[:1] // the rest are consequences, not findings
+	}
 	if len(a.failures) == 0 {
 		fmt.Println("PASS: " + pass)
 		return 0
