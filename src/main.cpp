@@ -76,6 +76,13 @@ static void applyLayers() {
     }
 }
 static const char* trackName(int i) { return campaign.tracks[size_t(i)].name.c_str(); }
+// A person's clickable box: from the head down past the feet, never smaller
+// than a comfortable click. The dev overlay draws this same rectangle, so what
+// it shows is what the game actually tests against.
+static Rectangle personHitBox(double screenX,double screenY,double pixels) {
+    float width=std::max(18.f,float(pixels)*.62f),height=std::max(20.f,float(pixels));
+    return {float(screenX)-width*.5f,float(screenY)-height,width,height*1.18f};
+}
 // Keeps the previous shader when a save does not compile, so a typo in a live
 // session cannot take down the window or the audio with it.
 static bool reloadShader(Shader& shader,int& resLoc,int& timeLoc,int& energyLoc,const fs::path& path,std::string& note) {
@@ -126,7 +133,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.14.1\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.15.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -182,7 +189,7 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.14.1\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.15.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
@@ -438,11 +445,7 @@ int main(int argc,char** argv) {
                 beaconX=float(beaconScreenX);beaconY=float(beaconScreenY);beaconFound=scene.found;
                 // An invisible box around the target, drawn feet-up and never
                 // smaller than a comfortable click.
-                float hitW=std::max(18.f,float(beaconPixels)*.62f),hitH=std::max(20.f,float(beaconPixels));
-                // The box runs from the head down past the feet: a person's
-                // ground point is where the eye says they are, so clicking
-                // their feet or shadow has to count.
-                Rectangle hitBox{float(beaconScreenX)-hitW*.5f,float(beaconScreenY)-hitH,hitW,hitH*1.18f};
+                Rectangle hitBox=personHitBox(beaconScreenX,beaconScreenY,beaconPixels);
                 bool overBeacon=beaconOnScreen&&CheckCollisionPointRec(pointer,hitBox);
                 if(overBeacon&&!scene.found
                    &&(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)||IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))) {
@@ -545,9 +548,24 @@ int main(int argc,char** argv) {
                         DrawRectangleRec({float(sx-px*.22),float(sy-px*.75),
                                           std::max(1.f,px*.44f),std::max(1.f,px*.8f)},
                                          toColor(ClothTones[spot.figure.shirt]));
+                        if(options.dev) {
+                            // DrawRectangleLines batches as lines; the Ex form is
+                            // four quads per box and costs real frames at a
+                            // thousand people.
+                            Rectangle box=personHitBox(sx,sy,px);
+                            DrawRectangleLines(int(box.x),int(box.y),int(box.width),int(box.height),
+                                               Fade(Colors[spot.layer],.55f));
+                        }
                         continue;
                     }
                     drawFigure(spot.figure,{float(sx),float(sy)},px);
+                    // Dev: every person boxed in the colour of the track whose
+                    // layer they belong to, matching that track's card.
+                    if(options.dev) {
+                        Rectangle box=personHitBox(sx,sy,px);
+                        DrawRectangleLines(int(box.x),int(box.y),int(box.width),int(box.height),
+                                           Fade(Colors[spot.layer],.7f));
+                    }
                 }
 
                 float pad=38*u;
@@ -561,7 +579,8 @@ int main(int argc,char** argv) {
                                      float(std::max(16.0,beaconPixels*1.6)),Fade(want,.55f));
                 }
                 if(options.dev&&!scene.found&&beaconOnScreen) {
-                    DrawRectangleLinesEx(hitBox,std::max(1.f,u),Fade(Color{255,120,120,255},.75f));
+                    DrawRectangleLinesEx(hitBox,std::max(2.f,u*2.2f),{255,255,255,255});
+                    DrawRectangleLinesEx(hitBox,std::max(1.f,u),Fade(Color{255,90,90,255},.95f));
                     centered(font,"TARGET",hitBox.x+hitBox.width*.5f,hitBox.y-13*u,10*u,{255,150,150,255});
                 }
                 DrawRectangleRounded({pad-16*u,pad-24*u,470*u,98*u},.08f,8,Fade(edge,.94f));
@@ -599,6 +618,7 @@ int main(int argc,char** argv) {
                 zoomText<<"ZOOM  x"<<std::fixed<<std::setprecision(1)<<zoomLevel
                         <<"    "<<layersOn<<" OF "<<campaign.count()<<" LAYERS SHOWING    "
                         <<drawnPeople<<" PEOPLE IN VIEW";
+                if(options.dev)zoomText<<"    BOXES = LAYER COLOUR";
                 text(font,zoomText.str(),pad,h-pad-4*u,11*u,{112,142,162,255});
                 if(elapsed-toastAt<2.6) {
                     float age=float(elapsed-toastAt),alpha=std::min(1.f,(2.6f-age)*2.2f);

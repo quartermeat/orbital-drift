@@ -184,8 +184,13 @@ Rules:
 - **Generation is deterministic and raylib-free.** `scene.hpp` uses its own
   PRNG, so a world is identical every run and on every machine, and the layout
   is unit-testable without a window.
-- `--dev` adds `G`, which jumps the view onto the target at full zoom and
-  outlines its hit box in red. It is the only cheat; keep it behind the flag.
+- `--dev` adds `G`, which jumps the view onto the target at full zoom, and
+  boxes **every** person in the colour of the track whose layer they belong to,
+  with the target's box outlined white and red. The boxes are the real
+  `personHitBox`, not an approximation, so the overlay shows what the game
+  actually tests against. Use `DrawRectangleLines`, not the `Ex` form: four
+  quads per box costs 17 fps at a thousand people. It is the only cheat; keep
+  it behind the flag.
 - **The hit box extends past the feet.** A person's ground point is where the
   eye says they are, so clicking their feet or shadow has to count; a box that
   stops at the feet misses the most natural click by a pixel.
