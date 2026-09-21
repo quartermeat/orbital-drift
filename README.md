@@ -9,10 +9,12 @@ Version **0.1.0**. This first milestone is an interactive sound scene; gameplay 
 ```sh
 python3 scripts/setup.py
 make -j4
-./build/orbital-drift
+make run
 ```
 
-Starts fullscreen with all seven tracks playing. No root privileges or system
+Interactive launches use dev mode (`--dev`), with skit outlines and `G` to jump
+to the target. Starts fullscreen with one track unlocked and the mix silent.
+No root privileges or system
 package installation is needed on this workstation. The build uses g++, make,
 OpenGL and X11 development headers already installed here. The setup script
 downloads checksum-pinned raylib 5.5 into `build/deps/`, copies the original

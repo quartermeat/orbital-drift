@@ -19,6 +19,7 @@ open questions. It is design rationale, not spec; this file holds the rules.
 ```
 make ci       # THE ONE TO RUN: build, unit, assets, campaigns, every live check
 make          # build build/orbital-drift
+make run      # build and launch fullscreen with --dev
 make test     # unit tests only, no window or audio device needed
 make figures  # regenerate artifacts/figures.png
 make worlds   # save a PNG of every world background
@@ -36,6 +37,8 @@ hot-reload | progression | find`, `tools/od/od campaigns`, `tools/od/od worlds`.
 
 Runtime: fullscreen by default. `--windowed`, `--seconds N`, `--capture f.png`,
 `--capture-after N`, `--state f.json`, `--assets DIR`, `--check-assets`, `--resume`.
+User preference: always launch with `--dev` for interactive use. Use `make run`
+or `./build/orbital-drift --dev`; automated checks retain their required flags.
 System view: `1`–`7` toggle, click an orbit node to descend, `Z` drops into the
 frontier world, `Space` pause, `M` all off/on, `A` all on, `+`/`-` volume,
 `F11` fullscreen, `Esc` exit.

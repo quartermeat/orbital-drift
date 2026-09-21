@@ -46,7 +46,7 @@ worlds: all tools/od/od
 check: test all
 	./build/orbital-drift --check-assets
 run: all
-	./build/orbital-drift
+	./build/orbital-drift --dev
 build/propsheet: tools/propsheet.cpp src/propdraw.hpp src/prop.hpp src/figure.hpp $(RAYLIB)/libraylib.a
 	mkdir -p build artifacts/props
 	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) $< -o $@ $(LDLIBS)
