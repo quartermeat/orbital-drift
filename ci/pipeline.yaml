@@ -29,6 +29,8 @@ stages:
         run: build/scene-test
       - name: campaign
         run: build/campaign-test
+      - name: listening
+        run: build/listening-test
 
   - name: assets
     parallel: true
@@ -65,3 +67,5 @@ stages:
         run: tools/od/od check find
       - name: revisit
         run: tools/od/od check revisit
+      - name: listening
+        run: tools/od/od check listening

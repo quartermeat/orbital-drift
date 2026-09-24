@@ -33,3 +33,7 @@ native:
 #   - a test framework: the checks are plain programs that print PASS or FAIL
 #   - an audio library beyond raylib: the mixer is ours, which is the point
 #   - numpy/scipy: they belong to bitwig-session-builder, not here
+
+# Optional runtime executables (not linked): parec and pactl from pulseaudio-utils.
+# --listen uses them to find playback outputs and capture only an output monitor through the existing
+# PipeWire/PulseAudio server. No extra library, mixer or microphone fallback.

@@ -120,7 +120,8 @@ struct Options {
     fs::path capture;
     fs::path campaignFile=fs::canonical("/proc/self/exe").parent_path().parent_path()/"campaigns"/"orbital-drift.conf";
     fs::path progressFile;   // set once the campaign is known: one save per campaign
-    bool windowed=false,check=false,resume=false,gallery=false,dev=false;
+    bool windowed=false,check=false,resume=false,gallery=false,dev=false,listen=false,chladni=false;
+    std::string monitor="auto";
     int world=-1;
     double captureAfter=2;
     double seconds=0;
@@ -148,7 +149,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.22.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.23.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -182,6 +183,8 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::rename(temp,options.state);
 }
 
+#include "listening.hpp"
+
 int main(int argc,char** argv) {
     bool windowReady=false,audioReady=false,streamReady=false;
     AudioStream stream{};
@@ -196,6 +199,9 @@ int main(int argc,char** argv) {
             else if(arg=="--resume")options.resume=true;
             else if(arg=="--gallery")options.gallery=true;
             else if(arg=="--dev")options.dev=true;
+            else if(arg=="--listen")options.listen=true;
+            else if(arg=="--chladni"){options.listen=true;options.chladni=true;}
+            else if(arg=="--monitor")options.monitor=value();
             else if(arg=="--campaign")options.campaignFile=fs::absolute(value());
             else if(arg=="--world")options.world=std::stoi(value());
             else if(arg=="--capture-after")options.captureAfter=std::stod(value());
@@ -204,10 +210,13 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.22.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
-                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n";return 0;
+                std::cout<<"Orbital Drift 0.23.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                         <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n"
+                         <<"--listen opens the GPU sand table for desktop music; --monitor NAME.monitor chooses an output monitor.\n"
+                         <<"--chladni starts that table on the shaking plate instead of the raking ball; P swaps them live.\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
+        if(options.listen)return runListening(options);
         campaign=loadCampaign(options.campaignFile);
         if(!campaign.note.empty())std::cout<<"[campaign] "<<campaign.note<<std::endl;
         if(campaign.tracks.empty())throw std::runtime_error("Campaign has no tracks: "+options.campaignFile.string());

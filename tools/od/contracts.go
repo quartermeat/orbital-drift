@@ -65,7 +65,7 @@ func goFixtures(dir string) error {
 	jsonShape(reflect.TypeOf(State{}), "", state)
 	if err := writeFixture(filepath.Join(dir, "state.json"), map[string]any{
 		"interface":     "state",
-		"produced_by":   "src/main.cpp writeState()",
+		"produced_by":   "src/main.cpp writeState() or src/listening.hpp runListening()",
 		"consumed_by":   "tools/od State",
 		"documented_in": "docs/interfaces/state.md",
 		"note":          "shape only: fps, renderer and frame counts differ per machine and per run",
@@ -87,18 +87,18 @@ func goFixtures(dir string) error {
 		"stages[].steps[].run":  "shell, run from the repo root with DISPLAY set",
 	}
 	budgetShape := map[string]string{
-		"limits.go_modules":  "int, maximum modules linked into tools/od",
-		"limits.native":      "int, maximum native libraries linked into the game",
-		"go[].module":        "string, module path as `go list -deps` reports it",
-		"go[].version":       "string",
-		"go[].lines":         "int, non-test source lines carried",
-		"go[].why":           "string, required; a dependency with no reason fails",
-		"native[].name":      "string",
-		"native[].version":   "string",
-		"native[].why":       "string",
-		"native[].vendored":  "path",
+		"limits.go_modules":   "int, maximum modules linked into tools/od",
+		"limits.native":       "int, maximum native libraries linked into the game",
+		"go[].module":         "string, module path as `go list -deps` reports it",
+		"go[].version":        "string",
+		"go[].lines":          "int, non-test source lines carried",
+		"go[].why":            "string, required; a dependency with no reason fails",
+		"native[].name":       "string",
+		"native[].version":    "string",
+		"native[].why":        "string",
+		"native[].vendored":   "path",
 		"native[].fetched_by": "path",
-		"native[].pinned":    "string, required; an unpinned native library fails",
+		"native[].pinned":     "string, required; an unpinned native library fails",
 	}
 	if err := writeFixture(filepath.Join(dir, "dependencies.json"), map[string]any{
 		"interface":     "dependencies",

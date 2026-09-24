@@ -13,7 +13,7 @@ func usage() {
 	fmt.Println(`od - Orbital Drift tooling
 
   od ci [pipeline.yaml]   run the whole pipeline (this is the one to run)
-  od check <name>         one live check: controls | hot-reload | progression | find | revisit
+  od check <name>         one live check: controls | hot-reload | progression | find | revisit | listening
   od interfaces [--write] check every layer interface against its fixture and doc
   od recognise            ask a local vision model to name every prop
   od deps                 check the dependency budget in ci/dependencies.yaml
@@ -51,6 +51,8 @@ func main() {
 			os.Exit(checkFind(root))
 		case "revisit":
 			os.Exit(checkRevisit(root))
+		case "listening":
+			os.Exit(checkListening(root))
 		default:
 			fmt.Fprintf(os.Stderr, "unknown check %q\n", os.Args[2])
 			os.Exit(2)

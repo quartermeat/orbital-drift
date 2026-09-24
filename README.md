@@ -78,6 +78,66 @@ setup can also copy the original stems from `~/Music/Orbital Drift/audio/`.
 
 ## How to play
 
+### Sand table (local development prototype)
+
+```sh
+make listen            # the raking ball
+make plate             # the Chladni plate
+```
+
+A tray of sand on the GPU, driven by music already playing on the desktop. Two
+mechanisms take turns with it, and `P` hands the tray from one to the other.
+
+**The ball** is a magnet under the tray. It follows a rosette whose radius,
+drift and speed come from the mix, raking grooves and ridges as it goes. Drag
+inside the tray to steer it by hand, and scroll to change how hard it is driven.
+
+**The plate** is the tray itself shaking. The pitch of whatever is playing picks
+a standing wave — a low note rings the plate in a few wide bands, a high one
+breaks it into many — and the sand walks off the parts that are shaking until
+only the still lines are holding any, which is a Chladni figure. Scroll to tune
+the plate against the note. It moves grains rather than drawing a pattern, so
+the tray holds exactly as many as it started with.
+
+The tray is a grid of matter, one cell to the pixel, each holding a whole number
+of grains; sand is simply the only kind of matter in it so far. The **grain
+slider** at the bottom left sets how big a cell is, from a grain a pixel up to a
+few pixels across. Coarse grain gives the cleanest figures — the sand has less
+ground to cross, so the nodal lines come out sharp — while fine grain is slower
+and dustier. Moving it rebuilds the tray and levels it.
+
+Either way, silence stops the mechanism and the sand keeps its figure: there is
+no fade and no timer. `Space` pauses, `C` levels the tray, drag the grain slider
+to change how coarse the sand is, `R` reconnects to the
+music output, `H` hides the caption, `F11` toggles fullscreen and `Escape` exits.
+Listening does not change your player or volume, save any audio, open a
+microphone, or alter campaign progress. These are measured frequency bands,
+transients and a tracked pitch — not instrument separation or song
+identification. This prototype is not in the published v0.22.0 bundles.
+
+Requires `parec` and `pactl` (Debian/Ubuntu package `pulseaudio-utils`), a
+running PulseAudio or PipeWire-Pulse desktop, and a GPU that can render to
+floating point textures. To select another output monitor explicitly:
+
+```sh
+./build/orbital-drift --dev --chladni --monitor easyeffects_sink.monitor
+```
+
+The default `--monitor auto` follows the output of the first listed playback
+stream, including Easy Effects, and checks for route changes every three seconds.
+If several players use different outputs, choose a monitor explicitly. With no
+playback streams it uses `@DEFAULT_MONITOR@`. Only output monitor names are
+accepted; there is no microphone fallback. Monitor semantics follow the upstream
+[PulseAudio client](https://github.com/pulseaudio/pulseaudio/blob/master/src/utils/pacat.c).
+State under `listening` in `artifacts/state.json` reports the connection, the
+measured features, the tracked pitch, which mechanism holds the tray, the plate's
+mode, and how much sand is on the tray and how far from flat it lies. The CI
+listening check sends tones to a temporary, inaudible output sink and checks
+capture, silence, the carving ball, and that the plate sorts conserved sand onto
+its nodal lines.
+
+### Original campaign
+
 A fresh run starts silent, with only Orbit Hats unlocked. Switch it on, then
 enter its world by clicking its orbit node or pressing `Z`. Match the person
 shown in the find panel to someone in the crowd. Claiming the correct person

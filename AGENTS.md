@@ -3,6 +3,10 @@
 Applies to `/home/quartermeat/work/orbital-drift`. The home `AGENTS.md` still
 governs anything not covered here.
 
+Latest session handoff: [docs/HANDOFF.md](docs/HANDOFF.md). As of September 20,
+2026, the public release is v0.22.0. Older milestone descriptions below are
+historical; consult the handoff, README, and current code for shipped behavior.
+
 ## What this is
 
 A puzzle game where **the mix is the game state**. Each track of a Bitwig
@@ -311,6 +315,53 @@ a sheet to `artifacts/figures.png` for judging it by eye.
   incoherent however it is pivoted, because the limbs turn with it; sunbathers
   need their own draw path.
 
+## Sand table — the listening prototype
+
+`--listen` and `--chladni` open one tray on the GPU, driven by desktop audio.
+The tray is a grid of matter, one cell to the pixel, each cell holding a whole
+number of grains -- sand is the only kind of matter in it so far, and the grain
+slider sets how big a cell is by rebuilding the tray. Two mechanisms share the
+field and `P` swaps them. Each of these cost a session to find, so do not undo
+them casually:
+
+- **The field must be floating point.** raylib's `LoadRenderTexture` is eight
+  bits a channel; the plate moves a thousandth of a tray per pass, every
+  exchange rounds back to where it started, and the tray sits there looking
+  broken while the state file insists it is working. `src/listening.hpp` builds
+  `R32` attachments through `rlgl` for exactly this reason.
+- **A settled figure is many times deeper than its bed.** Sand cleared off nine
+  tenths of the tray has to stand somewhere. The plate therefore starts from a
+  shallow bed and nothing clips a pile from above; clamping the height to one
+  destroys both the relief and the mass. This is why swapping mechanisms levels
+  the tray rather than handing the sand straight over.
+- **The transport rule scales with the grid.** Neighbouring cells on a fine
+  field differ by proportionally less energy, so `plateFlux` takes how many
+  cells cover a radius. Tuned at 96 square and left alone, the same rule does
+  visibly nothing at 1536.
+- **Both sides of a pair must compute the same exchange**, equal energies
+  included, or sand is quietly created. `sand_mass` is the check, and it is
+  measured on the GPU rather than assumed.
+- **A standing wave stands still.** `spin` is nearly frozen deliberately. A
+  figure that rotates lets sand settle only on the rings, never the diameters,
+  and the tray reads as a smear of arcs.
+- **The surface toggle is `P`, never `TAB`.** A window manager hands the focused
+  window a Tab press on its way out of an Alt-Tab, which swapped the surface
+  mid-run twice before the cause was found.
+- **Grains move in 2x2 blocks, never cell by cell.** A gather shader cannot pull
+  the same grain into two cells at once without inventing one, so the plate uses
+  a Margolus neighbourhood: every cell of a block works out the same single
+  exchange and reads off its own result. The block offset must alternate every
+  sweep or a grain rattles inside its own four cells forever. Conservation is
+  then exact and integer, which `tests/listening_test.cpp` asserts as equality.
+- **A block automaton needs an integer hash.** The usual `fract(sin(dot(...)))`
+  correlates along diagonals, and a block rule prints that correlation straight
+  onto the tray as hatching. Visible immediately, obvious only in hindsight.
+- **One sweep is far less work than the old continuous exchange**, so a frame is
+  worth several of them (`PlateSweeps`). The automaton runs in sweeps rather
+  than seconds: a slower machine gets a slower plate, not a different one.
+- `src/chladni.hpp` and `assets/chladni-update.fs` are the same rule twice, one
+  testable without a GPU and one that moves the real field. Change them together.
+
 ## Hot reload
 
 `assets/space.fs` and `assets/layers.conf` are watched by mtime and re-read
@@ -511,6 +562,5 @@ seconds. If it fails, fix it before pushing rather than pushing and mentioning
 the failure. The first time it ran it found a segfault that none of the
 individual checks covered, which is the entire argument for this rule.
 
-**This is not a git repository yet.** `VERSION` says `0.1.0`. Initialising it is
-a user decision — ask before running `git init`, and don't push without explicit
-intent.
+This is an existing public Git repository: `quartermeat/orbital-drift`, branch
+`main`. Do not reinitialize it. Push only with explicit user intent.

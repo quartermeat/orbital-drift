@@ -4,14 +4,14 @@ CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
 LDLIBS := $(RAYLIB)/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
 
 .PHONY: all setup run test check clean figures ci od worlds contracts interfaces props recognise
-all: build/orbital-drift build/contracts
+all: build/orbital-drift build/contracts build/listening-test
 setup:
 	python3 scripts/setup.py
 $(RAYLIB)/raylib.h:
 	python3 scripts/setup.py
 $(RAYLIB)/libraylib.a: $(RAYLIB)/raylib.h
 	$(MAKE) -C $(RAYLIB) PLATFORM=PLATFORM_DESKTOP GRAPHICS=GRAPHICS_API_OPENGL_33 RAYLIB_LIBTYPE=STATIC -j4
-build/orbital-drift: src/main.cpp src/mixer.hpp src/hotreload.hpp src/progress.hpp src/scene.hpp src/campaign.hpp src/figure.hpp assets/space.fs assets/layers.conf $(RAYLIB)/libraylib.a
+build/orbital-drift: src/main.cpp src/mixer.hpp src/hotreload.hpp src/progress.hpp src/scene.hpp src/campaign.hpp src/figure.hpp src/listening.hpp src/listening_audio.hpp src/sand_motion.hpp src/chladni.hpp src/desktop_monitor.hpp assets/space.fs assets/layers.conf assets/sand-update.fs assets/sand-render.fs assets/chladni-update.fs assets/sand-reduce.fs $(RAYLIB)/libraylib.a
 	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) src/main.cpp -o $@ $(LDLIBS)
 build/mixer-test: tests/mixer_test.cpp src/mixer.hpp
 	mkdir -p build
@@ -28,12 +28,16 @@ build/scene-test: tests/scene_test.cpp src/scene.hpp src/hotreload.hpp src/mixer
 build/campaign-test: tests/campaign_test.cpp src/campaign.hpp src/person.hpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -Isrc $< -o $@
-test: build/mixer-test build/config-test build/progress-test build/scene-test build/campaign-test
+build/listening-test: tests/listening_test.cpp src/listening_audio.hpp src/sand_motion.hpp src/chladni.hpp src/desktop_monitor.hpp
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -Isrc $< -o $@
+test: build/mixer-test build/config-test build/progress-test build/scene-test build/campaign-test build/listening-test
 	./build/mixer-test
 	./build/config-test
 	./build/progress-test
 	./build/scene-test
 	./build/campaign-test
+	./build/listening-test
 tools/od/od: tools/od/*.go tools/od/go.mod
 	cd tools/od && go build -o od .
 od: tools/od/od
@@ -47,6 +51,12 @@ check: test all
 	./build/orbital-drift --check-assets
 run: all
 	./build/orbital-drift --dev
+.PHONY: listen
+listen: all
+	./build/orbital-drift --dev --listen
+.PHONY: plate
+plate: all
+	./build/orbital-drift --dev --chladni
 build/propsheet: tools/propsheet.cpp src/propdraw.hpp src/prop.hpp src/figure.hpp $(RAYLIB)/libraylib.a
 	mkdir -p build artifacts/props
 	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) $< -o $@ $(LDLIBS)

@@ -30,10 +30,12 @@ const (
 )
 
 type State struct {
-	FPS            int     `json:"fps"`
-	Playing        bool    `json:"playing"`
-	RenderedFrames uint64  `json:"rendered_frames"`
-	OutputRMS      float64 `json:"output_rms"`
+	Mode           string          `json:"mode,omitempty"`
+	Listening      *ListeningState `json:"listening,omitempty"`
+	FPS            int             `json:"fps"`
+	Playing        bool            `json:"playing"`
+	RenderedFrames uint64          `json:"rendered_frames"`
+	OutputRMS      float64         `json:"output_rms"`
 	Tracks         []struct {
 		Name     string  `json:"name"`
 		Enabled  bool    `json:"enabled"`
@@ -67,6 +69,54 @@ type State struct {
 		BeaconWorldX float64 `json:"beacon_world_x"`
 		BeaconWorldY float64 `json:"beacon_world_y"`
 	} `json:"planet"`
+}
+
+type ListeningState struct {
+	Connected  bool    `json:"connected"`
+	Source     string  `json:"source"`
+	Error      string  `json:"error"`
+	SampleRate int     `json:"sample_rate"`
+	Frames     uint64  `json:"frames"`
+	RMS        float64 `json:"rms"`
+	Bass       float64 `json:"bass"`
+	Body       float64 `json:"body"`
+	Air        float64 `json:"air"`
+	Pulse      float64 `json:"pulse"`
+	Onsets     uint64  `json:"onsets"`
+	Tone       float64 `json:"tone"`
+	ToneHz     float64 `json:"tone_hz"`
+	Clarity    float64 `json:"clarity"`
+
+	// The tray, and which mechanism currently has it.
+	Surface    string  `json:"surface"`
+	FieldSize  int     `json:"field_size"`
+	GPURelief  bool    `json:"gpu_relief"`
+	SandMass   float64 `json:"sand_mass"`
+	SandSpread float64 `json:"sand_spread"`
+	Bed        float64 `json:"bed"`
+	Paused     bool    `json:"paused"`
+	Clears     int     `json:"clears"`
+	Strokes    uint64  `json:"strokes"`
+	Sweeps     uint64  `json:"sweeps"`
+	GrainPx    float64 `json:"grain_px"`
+
+	// The raking ball.
+	BallX       float64 `json:"ball_x"`
+	BallY       float64 `json:"ball_y"`
+	BallScreenX int     `json:"ball_screen_x"`
+	BallScreenY int     `json:"ball_screen_y"`
+	Distance    float64 `json:"distance"`
+	Speed       float64 `json:"speed"`
+	Drive       float64 `json:"drive"`
+
+	// The shaking plate.
+	Rings        float64 `json:"rings"`
+	Lobes        int     `json:"lobes"`
+	Spin         float64 `json:"spin"`
+	Harmonic     float64 `json:"harmonic"`
+	Agitation    float64 `json:"agitation"`
+	Tuning       float64 `json:"tuning"`
+	Reconfigures int     `json:"reconfigures"`
 }
 
 type App struct {
@@ -263,7 +313,9 @@ func (a *App) State() State {
 	return State{}
 }
 
-func (a *App) Fail(format string, args ...any) { a.failures = append(a.failures, fmt.Sprintf(format, args...)) }
+func (a *App) Fail(format string, args ...any) {
+	a.failures = append(a.failures, fmt.Sprintf(format, args...))
+}
 
 func (a *App) Require(ok bool, format string, args ...any) {
 	if !ok {

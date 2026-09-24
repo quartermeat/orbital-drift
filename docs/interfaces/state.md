@@ -6,7 +6,7 @@ Everything the app knows, for whoever is driving it.
 > the live code and fails if it differs from what is committed. If this file
 > and the code disagree, the build stops.
 
-- **Produced by:** `writeState()` in `src/main.cpp`, written with `--state file.json`
+- **Produced by:** `writeState()` in `src/main.cpp`, or `runListening()` in `src/listening.hpp`, written with `--state file.json`
 - **Consumed by:** the `State` struct in `tools/od/app.go`
 - **Fixture:** [`testdata/interfaces/state.json`](../../testdata/interfaces/state.json)
 - **Written:** every 0.2 s while running, and once on exit
@@ -29,3 +29,84 @@ written against these fields. Notable ones earned the hard way:
   is bringing out.
 - `rendered_frames` — strictly increasing while the mixer runs; every check
   uses it to prove audio never stalled.
+
+## Listening island
+
+`--listen` writes `mode: "listening"` and the optional `listening` object.
+The campaign's mixer, track and progression fields are absent in this mode;
+the existing campaign-mode JSON stays unchanged. `fps`, `running`, renderer,
+fullscreen and dimensions remain available in either mode.
+
+- `connected`, `source`, `error`: monitor connection and readable failures.
+  The default `--monitor auto` selects the output sink of the first listed
+  playback stream (so Easy Effects routing is followed), checking every three
+  seconds. With no playback streams it uses `@DEFAULT_MONITOR@`. `source` always
+  reports the resolved capture source. An explicit `@DEFAULT_MONITOR@` captures
+  the default output; another named source must end in `.monitor`. There is no
+  input fallback. `R` reconnects. Silence is a valid, connected state. With
+  simultaneous playback on different outputs, use an explicit monitor to choose.
+- `sample_rate` is 24000, `frames` counts captured mono samples. `rms` is the
+  latest 512-sample RMS. `bass`, `body`, `air` and `pulse` are normalized measured
+  responses, not separate instruments, beat-grid estimates or generated data.
+  Pulse onsets use a relative low-band threshold and a refractory period;
+  `onsets` counts detections. Missing input clears responses after one second.
+- `tone_hz` is the strongest pitch in the mix, from a log-spaced bank of
+  twenty-five bins between 55 Hz and 3520 Hz, tilted so that bass does not win
+  every measurement by default. `tone` is that pitch's position across the
+  bank's span, which is what the plate is actually driven by. `clarity` is how
+  much of the spectrum stands behind the peak: near one for a held tone, low
+  for noise. Below a clarity floor the last pitch is held rather than followed,
+  so silence and applause do not drag the figure to the bottom of the range.
+  This is pitch tracking, not note naming, stem separation or song recognition.
+
+### The tray
+
+The tray is a grid of matter, one cell to the pixel, and each cell holds a whole
+number of grains. Sand is the only kind of matter in it so far. `field_size` is
+how many cells lie across it and `grain_px` how many screen pixels one of them
+covers, which the grain slider sets by rebuilding the tray rather than by
+blurring the picture. `gpu_relief` records that the relief is real geometry.
+
+Two mechanisms take turns with the tray, named by `surface`, and `P` hands it
+from one to the other. Handing it over levels it, because the two want different
+depths: `bed` is the grains a levelled cell holds. `paused` is the space bar,
+`clears` counts levellings from `C`, `strokes` counts frames of work and
+`sweeps` the plate's individual passes over the grid.
+
+- `sand_mass` and `sand_spread` are the mean and standard deviation of the
+  grains per cell over the tray, measured on the GPU every quarter second rather
+  than assumed. Mass is the honest test of the plate: grains move between cells
+  in 2x2 blocks and are never created, so the mean holds its bed for as long as
+  it runs. The ball is a carve rather than a transport and does add sand, so the
+  conservation reading belongs to the plate. Spread is how far from level the
+  tray lies, which is the difference between a figure and an excuse -- a plate
+  reporting agitation with no spread has done nothing.
+- The gauge samples the tray rather than summing every cell, so the mass carries
+  a little sampling noise and reads a hair under the bed. Conservation is a
+  claim about it holding steady, not about the last decimal.
+
+### The raking ball
+
+`ball_x`/`ball_y` are the ball on the unit tray and `ball_screen_x`/`_y` are
+where it was actually drawn, so a driving script never reimplements the layout.
+`distance` and `speed` are its travel and current rate, `drive` the wheel.
+Silence stops the mechanism; the sand keeps what was carved.
+
+### The Chladni plate
+
+The plate is a standing wave, and the sand walks off the parts of the tray that
+are shaking until only the still lines are left holding any.
+
+- `rings` is the radial wavenumber and `lobes` the number of diameters: pitch
+  chooses both, so a low note rings the plate in a few wide bands and a high one
+  breaks it into many. `lobes` is a whole number with a deadband, and
+  `reconfigures` counts how often the figure has had to jump to a new one.
+- `spin` is where the diameters point. It barely moves by design: a standing
+  wave stands still, and a figure that rotates smears into rings because the
+  sand can never settle onto a diameter.
+- `harmonic` is the weight of the second, brighter mode mixed into the first,
+  and `tuning` is the wheel. `agitation` is how hard the plate is being shaken:
+  zero in silence, which freezes the figure exactly rather than fading it.
+
+Audio samples exist only in transient memory. No output stream or microphone
+is opened by listening mode. Playback, volume and campaign saves are untouched.
