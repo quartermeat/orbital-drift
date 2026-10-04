@@ -1,5 +1,22 @@
 # Session handoff — September 20, 2026
 
+## Update — October 4: empty sound table and v0.25.0
+
+The table now starts with zero grains. Holding left click on the tray places a
+grain immediately and another every 20 ms, up to the grid capacity; release
+stops placement. Clicks on the source picker and grain slider are not treated
+as placement. `C`, a resize, and a grain-size change clear the tray. State
+reports `bed=0`, and grain count and mass reflect only user-placed sand.
+
+The earlier uncommitted source-picker improvements were retained: the picker
+shows Auto desktop audio and physical microphones, hiding output monitors and
+virtual loopbacks. The sound-table live check now places grains, verifies their
+motion and conservation, and handles window-manager resizing during a tone.
+Full `make ci` passed in 114 seconds, including all six live checks; recognition
+met its 9-of-12 floor. The user authorized a versioned commit, tag, and push for
+v0.25.0. The unrelated untracked `src/listening_garden.hpp` remains outside
+that commit.
+
 ## Update — October 4: individually stateful sand
 
 The sound table now stores a persistent position, velocity, and local vibration

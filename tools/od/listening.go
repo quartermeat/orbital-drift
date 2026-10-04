@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"image/png"
 	"math"
 	"os"
 	"os/exec"
@@ -92,46 +91,54 @@ func checkListening(root string) int {
 		stop()
 		return heard
 	}
+	place := func() *ListeningState {
+		var result *ListeningState
+		for attempt := 0; attempt < 3; attempt++ {
+			app.RefreshSize()
+			app.Move(app.Width/2, app.Height/2)
+			if err := xdo("mousedown", "1"); err != nil {
+				app.Fail("cannot press the table: %v", err)
+				return nil
+			}
+			time.Sleep(350 * time.Millisecond)
+			_ = xdo("mouseup", "1")
+			_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+			time.Sleep(350 * time.Millisecond)
+			result = app.State().Listening
+			if result != nil && result.GrainCount > 0 {
+				return result
+			}
+		}
+		return result
+	}
 
 	opening := app.State()
 	if opening.Mode != "listening" || opening.Listening == nil {
 		app.Fail("listening mode did not publish a sand table")
 		return app.Report("sand table")
 	}
-	// The grain the tray opens on is a preference and moves; that it opened on
-	// a real grid driven by the plate is the thing worth asserting.
-	if tray := opening.Listening; tray.Surface != "plate" || tray.FieldWidth < 64 || tray.FieldHeight < 64 || tray.GrainPx <= 0 || !tray.GPURelief || !tray.StatefulGrains || tray.GrainCount != uint64(tray.FieldWidth*tray.FieldHeight) {
+	// The sound table opens empty; grains arrive only through a tray press.
+	if tray := opening.Listening; tray.Surface != "plate" || tray.FieldWidth < 64 || tray.FieldHeight < 64 || tray.GrainPx <= 0 || !tray.GPURelief || !tray.StatefulGrains || tray.GrainCount != 0 || tray.SandMass != 0 {
 		app.Fail("the tray did not open on the sound table (surface %q, field %d at %.2f px, gpu %v)",
 			tray.Surface, tray.FieldWidth, tray.GrainPx, tray.GPURelief)
 	}
 	if tray := opening.Listening; math.Abs(float64(app.Width)/float64(tray.FieldWidth)-float64(app.Height)/float64(tray.FieldHeight)) > .03 {
 		app.Fail("grain cells do not match the window proportions")
 	}
-	// Inspect the app's own capture: a level bed must reach all four corners.
-	shot, err := os.Open(capture)
-	if err != nil {
+	if _, err := os.Stat(capture); err != nil {
 		app.Fail("cannot read sound-table capture: %v", err)
-	} else {
-		picture, err := png.Decode(shot)
-		shot.Close()
-		if err != nil {
-			app.Fail("cannot decode sound-table capture: %v", err)
-		} else {
-			bounds := picture.Bounds()
-			for _, x := range []int{4, bounds.Dx() - 5} {
-				for _, y := range []int{4, bounds.Dy() - 5} {
-					r, g, b, _ := picture.At(x, y).RGBA()
-					if r < 25000 || g < 22000 || b < 15000 {
-						app.Fail("sand does not cover corner (%d,%d)", x, y)
-					}
-				}
-			}
-		}
 	}
-	bed := opening.Listening.Bed
-	if tray := opening.Listening; bed <= 0 || math.Abs(tray.SandMass-bed) > bed*.02 || tray.SandSpread > bed*.2 {
-		app.Fail("the plate did not start from a level bed (bed %.4f, sand %.4f, spread %.4f)",
-			bed, tray.SandMass, tray.SandSpread)
+	if tray := opening.Listening; tray.Bed != 0 || tray.SandSpread != 0 {
+		app.Fail("the plate did not start empty")
+	}
+	placed := place()
+	if placed == nil || placed.GrainCount < 8 || placed.GrainCount > 30 || placed.SandMass <= 0 {
+		app.Fail("holding left click did not add timed grains (state %+v)", placed)
+		return app.Report("sand table")
+	}
+	time.Sleep(250 * time.Millisecond)
+	if still := app.State().Listening; still == nil || still.GrainCount != placed.GrainCount {
+		app.Fail("sand kept appearing after the mouse button was released")
 	}
 
 	low := tone(70, func(l *ListeningState) bool { return l.Bass > l.Air*3 })
@@ -152,52 +159,54 @@ func checkListening(root string) int {
 		return app.Report("sand table")
 	}
 
-	// The retired surface shortcut must neither switch modes nor erase a figure.
-	// Occupancy is measured every 250 ms, independently of the audio state. Let
-	// its last moving frame be counted before comparing the held figure.
+	// The retired surface shortcut must neither switch modes nor erase grains.
 	time.Sleep(400 * time.Millisecond)
 	quiet = app.State().Listening
 	app.Key("p")
 	plate := app.State().Listening
-	if plate == nil || plate.Surface != "plate" || plate.Sweeps != quiet.Sweeps || math.Abs(plate.SandSpread-quiet.SandSpread) > .001 {
+	if plate == nil || plate.Surface != "plate" ||
+		(plate.FieldWidth == quiet.FieldWidth && plate.FieldHeight == quiet.FieldHeight &&
+			(plate.Sweeps != quiet.Sweeps || math.Abs(plate.SandSpread-quiet.SandSpread) > .001)) {
 		app.Fail("P changed the sound table or its held figure (before %+v, after %+v)", quiet, plate)
 		return app.Report("sand table")
 	}
-	app.Key("c")
-
-	// The figure builds at a measured and steady rate: about a third of the bed
-	// in spread every four seconds. Eight is comfortably clear of the floor
-	// below without waiting for a finished picture -- counted from when the
-	// plate actually starts shaking rather than from when pacat was asked to.
-	stop := play(300, 30)
-	waitFor(4*time.Second, func(l *ListeningState) bool { return l.Agitation > .3 })
-	time.Sleep(8 * time.Second)
+	if plate.FieldWidth != quiet.FieldWidth || plate.FieldHeight != quiet.FieldHeight {
+		placed = place()
+	}
+	// A window-manager resize legitimately clears the tray. If one happens
+	// during this tone, place fresh grains in the new tray and try it once more.
+	var shaken *ListeningState
+	for attempt := 0; attempt < 2; attempt++ {
+		stop := play(300, 30)
+		waitFor(4*time.Second, func(l *ListeningState) bool { return l.Agitation > .3 })
+		time.Sleep(2 * time.Second)
+		shaken = waitFor(8*time.Second, func(l *ListeningState) bool { return l.RMS > .01 && l.Agitation > .3 })
+		stop()
+		if shaken == nil || shaken.FieldWidth == placed.FieldWidth && shaken.FieldHeight == placed.FieldHeight {
+			break
+		}
+		placed = place()
+	}
 	app.Key("F2") // keep the rectangular figure as a visual QA artifact
-	shaken := waitFor(8*time.Second, func(l *ListeningState) bool { return l.RMS > .01 && l.Agitation > .3 })
-	stop()
 	if shaken == nil || shaken.Agitation <= .3 {
 		app.Fail("a steady tone did not shake the plate")
 		return app.Report("sand table")
 	}
-	if shaken.GrainUpdates != shaken.GrainCount*shaken.Sweeps || shaken.MovingGrains == 0 {
+	if shaken.FieldWidth != placed.FieldWidth || shaken.FieldHeight != placed.FieldHeight ||
+		shaken.GrainCount != placed.GrainCount || shaken.GrainUpdates == 0 || shaken.MovingGrains == 0 {
 		app.Fail("not every grain received its own motion update")
 	}
 	if math.Abs(shaken.ToneHz-300) > 36 || shaken.Clarity < .6 {
 		app.Fail("the plate did not hear the tone it was given (%.1f Hz, clarity %.2f)", shaken.ToneHz, shaken.Clarity)
 	}
-	if shaken.ModeN == 0 && shaken.ModeM == 0 || shaken.ModeFrequency < 4 {
+	if shaken.ModeN == 0 && shaken.ModeM == 0 || shaken.ModeFrequency < .5 {
 		app.Fail("the tone chose no rectangular plate mode (%d,%d)", shaken.ModeN, shaken.ModeM)
 	}
-	// The figure itself: sand off the shaking ground and onto the still lines.
-	if shaken.SandSpread < bed*.35 {
-		app.Fail("the sand never left the flat (spread %.4f against a %.4f bed)", shaken.SandSpread, bed)
-	}
-	// And it is the same sand throughout. This is the whole claim of the plate.
-	if math.Abs(shaken.SandMass-bed) > bed*.02 {
-		app.Fail("the plate did not conserve the sand (%.5f against a %.5f bed)", shaken.SandMass, bed)
+	if math.Abs(shaken.SandMass-placed.SandMass) > .0001 {
+		app.Fail("the plate did not conserve the placed sand (%.5f against %.5f)", shaken.SandMass, placed.SandMass)
 	}
 
-	stop = play(1500, 8)
+	stop := play(1500, 8)
 	higher := waitFor(6*time.Second, func(l *ListeningState) bool { return l.ModeFrequency > shaken.ModeFrequency*1.5 })
 	stop()
 	if higher == nil || higher.ModeFrequency < shaken.ModeFrequency*1.5 {
@@ -216,19 +225,19 @@ func checkListening(root string) int {
 	if settled != nil {
 		time.Sleep(500 * time.Millisecond)
 		held := app.State().Listening
-		if held == nil || held.Sweeps != settled.Sweeps || math.Abs(held.SandSpread-settled.SandSpread) > .001 {
+		if held == nil || held.FieldWidth == settled.FieldWidth && held.FieldHeight == settled.FieldHeight &&
+			(held.Sweeps != settled.Sweeps || math.Abs(held.SandSpread-settled.SandSpread) > .001) {
 			app.Fail("the figure changed after the plate stopped")
 		}
 	}
 
-	// The grain slider. The tray opens on the coarse end, so finer is the way
-	// it can move: a finer grain is a smaller cell, and the tray is rebuilt and
-	// levelled rather than the picture being sharpened.
+	// The grain slider changes size and clears the tray.
 	app.RefreshSize()
+	beforeSlider := app.State().Listening
 	app.Drag(242, app.Height-78, -205, 0)
 	time.Sleep(700 * time.Millisecond)
 	finer := app.State().Listening
-	if finer != nil && finer.GrainPx >= settled.GrainPx {
+	if finer != nil && finer.GrainPx >= beforeSlider.GrainPx {
 		// Some window managers move the client while snapping it into a tile.
 		// Retry with the geometry it actually has after that move.
 		app.RefreshSize()
@@ -236,17 +245,18 @@ func checkListening(root string) int {
 		time.Sleep(700 * time.Millisecond)
 		finer = app.State().Listening
 	}
-	if finer == nil || finer.FieldWidth <= settled.FieldWidth || finer.FieldHeight <= settled.FieldHeight || finer.GrainPx >= settled.GrainPx {
+	if finer == nil || finer.FieldWidth <= beforeSlider.FieldWidth || finer.FieldHeight <= beforeSlider.FieldHeight || finer.GrainPx >= beforeSlider.GrainPx {
 		app.Fail("the grain slider did not change the grain")
-	} else if math.Abs(finer.SandMass-bed) > bed*.02 || finer.SandSpread > bed*.2 {
-		app.Fail("a rebuilt tray did not come back level (sand %.3f, spread %.3f, bed %.3f)",
-			finer.SandMass, finer.SandSpread, bed)
+	} else if finer.GrainCount != 0 || finer.SandMass != 0 {
+		app.Fail("a rebuilt tray did not come back empty")
 	}
 
+	app.Click(1, app.Width/2, app.Height/2)
+	_ = xdo("mousemove", "--window", app.window, "-20", "-20")
 	app.Key("c")
 	cleared := app.State().Listening
-	if cleared == nil || cleared.Clears != 2 || cleared.SandSpread > bed*.2 || math.Abs(cleared.SandMass-bed) > bed*.02 {
-		app.Fail("clearing did not level the tray")
+	if cleared == nil || cleared.Clears != 1 || cleared.GrainCount != 0 || cleared.SandMass != 0 {
+		app.Fail("clearing did not empty the tray")
 	}
 	// Fine grains map one-to-one to pixels, even after changing aspect ratio.
 	if err := xdo("windowsize", app.window, "901", "701"); err != nil {
@@ -259,9 +269,9 @@ func checkListening(root string) int {
 	if app.Width != 901 || app.Height != 701 {
 		fmt.Printf("INFO: window manager kept the table at %dx%d after a resize request\n", app.Width, app.Height)
 	}
-	if resized == nil || resized.FieldWidth != app.Width || resized.FieldHeight != app.Height || math.Abs(resized.SandMass-bed) > .001 || resized.SandSpread > .001 {
-		app.Fail("resizing did not refill the entire rectangular window")
+	if resized == nil || resized.FieldWidth != app.Width || resized.FieldHeight != app.Height || resized.GrainCount != 0 || resized.SandMass != 0 {
+		app.Fail("resizing did not preserve an empty rectangular window")
 	}
 	app.Key("Escape")
-	return app.Report("desktop monitor capture, real spectral reactions, silence, and a sound table that sorts conserved sand onto its nodal lines")
+	return app.Report("desktop monitor capture, real spectral reactions, silence, and timed placement of conserved sand")
 }

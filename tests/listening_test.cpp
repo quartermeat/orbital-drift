@@ -94,7 +94,14 @@ int main() {
     PlateDriver table;table.live={4,2,1};table.agitation=.9f;
     ParticleSand tray;tray.reset(97,63);
     const size_t grainCount=97*63;
-    assert(tray.grains.size()==grainCount&&tray.grainUpdates==0);
+    assert(tray.grains.empty()&&tray.grainUpdates==0);
+    tray.measure();assert(tray.spread==0);
+    assert(tray.add(10,20)&&tray.grains.size()==1);
+    assert(tray.grains[0].x==10&&tray.grains[0].y==20);
+    tray.reset(97,63);assert(tray.grains.empty());
+    for(int y=0;y<tray.height;++y)for(int x=0;x<tray.width;++x)
+        assert(tray.add(x+.5f,y+.5f));
+    assert(!tray.add(10,20)&&tray.grains.size()==grainCount);
     auto original=tray.grains;
     for(int i=0;i<300;++i)tray.update(table,1.f/60);
     assert(tray.grains.size()==grainCount);
@@ -115,7 +122,7 @@ int main() {
     tray.update(pausedTable,1.f/60);
     assert(tray.grains==heldGrains&&tray.grainUpdates==grainCount*300);
     tray.reset(97,63);
-    tray.measure();assert(tray.grains.size()==grainCount&&tray.spread==0);
+    tray.measure();assert(tray.grains.empty()&&tray.spread==0);
 
     // Routing follows what is sounding now, not what opened a stream first.
     const char* sinks="58\tspeakers\tPipeWire\n131\teasyeffects_sink\tPipeWire\n";
@@ -137,9 +144,15 @@ int main() {
     assert(DesktopMonitor::musicSource(false)=="@DEFAULT_MONITOR@");
     auto choices=DesktopMonitor::parseSources(
         "Source #1\n\tName: speakers.monitor\n\tDescription: Monitor of Speakers\n\tMonitor of Sink: speakers\n"
-        "Source #2\n\tName: webcam.mic\n\tDescription: Webcam Microphone\n\tMonitor of Sink: n/a\n");
-    assert(choices.size()==2&&choices[0].name=="speakers.monitor"&&!choices[0].input);
-    assert(choices[1].name=="webcam.mic"&&choices[1].input);
-    assert(choices[1].label=="INPUT: Webcam Microphone");
-    std::cout<<"PASS: measured bands, pulses, silence, tracked pitch, plate modes, stateful grains, source discovery, pause and clear\n";
+        "Source #2\n\tName: webcam.mic\n\tDescription: Brio Webcam Mono\n\tMonitor of Sink: n/a\n"
+        "Source #3\n\tName: analog.mic\n\tDescription: Analog Stereo\n\tMonitor of Sink: n/a\n"
+        "\tPorts:\n\t\tanalog-input-rear-mic: Rear Microphone (type: Mic)\n"
+        "\tActive Port: analog-input-rear-mic\n"
+        "Source #4\n\tName: virtual.mic\n\tDescription: Effects Source\n\tMonitor of Sink: n/a\n"
+        "\t\tnode.virtual = \"true\"\n");
+    assert(choices.size()==2&&choices[0].name=="webcam.mic"&&choices[0].input);
+    assert(choices[0].label=="MIC: Brio Webcam Mono");
+    assert(choices[1].name=="analog.mic"&&choices[1].input);
+    assert(choices[1].label=="MIC: Rear Microphone (Analog Stereo)");
+    std::cout<<"PASS: measured bands, pulses, silence, tracked pitch, plate modes, placed stateful grains, source discovery, pause and clear\n";
 }

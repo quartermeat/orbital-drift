@@ -1,7 +1,7 @@
 #pragma once
 // Every visible grain owns a position, velocity, and local vibration state.
 // The grid below is only a lookup table for the plate's force; it does not hold
-// or exchange sand. Grains never merge, split, or disappear.
+// or exchange sand. Grains are created by the user and never merge or split.
 #include "chladni.hpp"
 
 namespace orbital {
@@ -44,11 +44,11 @@ public:
         width=w;height=h;grains.clear();grains.reserve(size_t(w)*h);
         force.assign(size_t(w)*h,{});occupancy.assign(size_t(w)*h,0);
         lastWeight=-1;sweeps=grainUpdates=0;moving=0;spread=0;
-        for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
-            uint32_t id=uint32_t(size_t(y)*w+x);
-            grains.push_back({x+.5f+(unit(id*2+1)-.5f)*.22f,
-                              y+.5f+(unit(id*2+2)-.5f)*.22f,0,0,0});
-        }
+    }
+    bool add(float x,float y) {
+        if(width<1||height<1||grains.size()>=size_t(width)*height)return false;
+        grains.push_back({std::clamp(x,.5f,width-.5f),std::clamp(y,.5f,height-.5f),0,0,0});
+        return true;
     }
     void update(const PlateDriver& plate,float dt) {
         if(plate.paused||plate.agitation<=0||dt<=0)return;
@@ -88,6 +88,7 @@ public:
         ++sweeps;grainUpdates+=grains.size();
     }
     void measure() {
+        if(occupancy.empty()){spread=0;return;}
         std::fill(occupancy.begin(),occupancy.end(),0u);
         for(const auto& grain:grains) {
             int x=std::clamp(int(grain.x),0,width-1),y=std::clamp(int(grain.y),0,height-1);

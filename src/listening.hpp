@@ -33,9 +33,7 @@ static int runListening(const Options& options) {
             throw std::runtime_error("Cannot compile grain point shaders");
         grainVao=rlLoadVertexArray();
         if(!grainVao)throw std::runtime_error("Cannot create grain vertex array");
-        // Open on the coarse end. A grain a pixel is the finest the tray goes
-        // and it reads as dust; a grain a few pixels across is where the figure
-        // actually looks like sand, so that is what you get handed.
+        // Open on the coarse end; the tray itself starts empty.
         int grainChoice=GrainChoices-1,fieldWidth=0,fieldHeight=0;
         auto gridExtent=[&](int pixels){return std::max(2,int(std::ceil(pixels/GrainSteps[grainChoice])));};
         ParticleSand sand;
@@ -45,7 +43,7 @@ static int runListening(const Options& options) {
             fieldWidth=gridExtent(GetScreenWidth());fieldHeight=gridExtent(GetScreenHeight());
             clear();
             if(grainVbo)rlUnloadVertexBuffer(grainVbo);
-            grainVbo=rlLoadVertexBuffer(nullptr,int(sand.grains.size()*3*sizeof(float)),true);
+            grainVbo=rlLoadVertexBuffer(nullptr,int(size_t(fieldWidth)*fieldHeight*3*sizeof(float)),true);
             if(!grainVbo)throw std::runtime_error("Cannot create grain vertex buffer");
             rlEnableVertexArray(grainVao);rlEnableVertexBuffer(grainVbo);
             rlSetVertexAttribute(0,3,RL_FLOAT,false,3*sizeof(float),0);
@@ -56,7 +54,7 @@ static int runListening(const Options& options) {
         DesktopMonitor monitor;monitor.requestedSource=options.monitor;monitor.start();
         PlateDriver plate;
         bool paused=false;
-        float sandMass=1,sandSpread=0;
+        float sandMass=0,sandSpread=0;
         std::vector<float> vertices;
         int resLoc=GetShaderLocation(grainShader,"resolution"),sizeLoc=GetShaderLocation(grainShader,"grainSize");
         auto measureMass=[&] {
@@ -66,7 +64,8 @@ static int runListening(const Options& options) {
         double started=GetTime(),lastData=started,lastState=0,lastRoute=started,lastTouch=started,lastMass=0;
         double lastSound=started;
         std::future<std::string> routeQuery;
-        bool captured=false,showHelp=true,draggingGrain=false,sourcesOpen=false;
+        bool captured=false,showHelp=true,draggingGrain=false,sourcesOpen=false,placing=false;
+        double nextGrain=0;
         std::vector<DesktopMonitor::SourceOption> sources;
         std::future<std::vector<DesktopMonitor::SourceOption>> sourcesQuery;
         int sourceScroll=0;
@@ -82,7 +81,7 @@ static int runListening(const Options& options) {
         auto write=[&](bool running) {
             fs::create_directories(options.state.parent_path());auto temp=options.state;temp+=".tmp";
             std::ofstream out(temp);const auto& f=monitor.analysis.value;
-            out<<"{\"app\":\"orbital-drift\",\"version\":\"0.24.0\",\"mode\":\"listening\",\"running\":"<<(running?"true":"false")
+            out<<"{\"app\":\"orbital-drift\",\"version\":\"0.25.0\",\"mode\":\"listening\",\"running\":"<<(running?"true":"false")
                <<",\"renderer\":"<<quote(gpu)<<",\"hardware_accelerated\":true,\"fps\":"<<GetFPS()
                <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")<<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()
                <<",\"transparent_background\":true"
@@ -100,7 +99,7 @@ static int runListening(const Options& options) {
                <<",\"surface\":\"plate\",\"field_width\":"<<fieldWidth<<",\"field_height\":"<<fieldHeight
                <<",\"grain_px\":"<<float(GetScreenWidth())/fieldWidth
                <<",\"gpu_relief\":true,\"sand_mass\":"<<sandMass<<",\"sand_spread\":"<<sandSpread
-               <<",\"bed\":1,\"stateful_grains\":true,\"grain_count\":"<<sand.grains.size()
+               <<",\"bed\":0,\"stateful_grains\":true,\"grain_count\":"<<sand.grains.size()
                <<",\"moving_grains\":"<<sand.moving<<",\"grain_updates\":"<<sand.grainUpdates
                <<",\"paused\":"<<(paused?"true":"false")<<",\"clears\":"<<clears
                <<",\"strokes\":"<<strokes<<",\"sweeps\":"<<sand.sweeps
@@ -129,7 +128,7 @@ static int runListening(const Options& options) {
             if(sourcesQuery.valid()&&sourcesQuery.wait_for(std::chrono::milliseconds(0))==std::future_status::ready) {
                 sources=sourcesQuery.get();sourceScroll=0;
             }
-            // Resizing creates one independent grain at each new grid location.
+            // Changing the grid clears the tray, including user-placed grains.
             if(fieldWidth!=gridExtent(GetScreenWidth())||fieldHeight!=gridExtent(GetScreenHeight())) {
                 buildTray();plate.clear();strokes=0;lastMass=0;
             }
@@ -155,7 +154,7 @@ static int runListening(const Options& options) {
             }
             if(IsKeyPressed(KEY_SPACE)){paused=!paused;lastTouch=now;}
             if(IsKeyPressed(KEY_H))showHelp=!showHelp;
-            bool sourceClick=false;
+            bool sourceClick=sourcesOpen&&IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
             if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)&&(showHelp||sourcesOpen)) {
                 Vector2 at=GetMousePosition();Rectangle button=sourceButton();
                 if(CheckCollisionPointRec(at,button)) {
@@ -172,10 +171,10 @@ static int runListening(const Options& options) {
                             monitor.start();lastData=now;lastSound=now;
                             sourcesOpen=false;sourceClick=true;lastTouch=now;
                         }
-                    } else sourcesOpen=false;
+                    } else {sourcesOpen=false;sourceClick=true;}
                 }
             }
-            // Grain size, dragged. Changing it changes the number of grains.
+            // Grain size, dragged. Changing it clears the tray.
             {
                 float ui=std::max(1.f,GetScreenHeight()/1000.f);
                 Rectangle track=grainTrack();
@@ -191,6 +190,20 @@ static int runListening(const Options& options) {
                         plate.clear();strokes=0;lastMass=0;
                     }
                     lastTouch=now;
+                }
+            }
+            // A press on the tray deposits immediately, then one grain every
+            // 20 ms while held. Presses on controls never paint through them.
+            Vector2 at=GetMousePosition();
+            bool inside=at.x>=0&&at.y>=0&&at.x<GetScreenWidth()&&at.y<GetScreenHeight();
+            if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                placing=inside&&!sourceClick&&!draggingGrain;
+                nextGrain=now;
+            }
+            if(!IsMouseButtonDown(MOUSE_BUTTON_LEFT))placing=false;
+            if(placing&&inside) {
+                for(int added=0;now>=nextGrain&&added<8;++added,nextGrain+=.02) {
+                    if(!sand.add(at.x*fieldWidth/GetScreenWidth(),at.y*fieldHeight/GetScreenHeight()))break;
                 }
             }
             float wheel=GetMouseWheelMove();
@@ -248,7 +261,7 @@ static int runListening(const Options& options) {
                 DrawRectangleRec({along-3*ui,track.y-8*ui,6*ui,20*ui},ink);
                 float grainPixels=float(GetScreenWidth())/fieldWidth;
                 label(TextFormat("GRAIN   %.2f px",double(grainPixels)),track.x,track.y-30*ui,12*ui);
-                const char* controls="SCROLL TO TUNE   /   SPACE PAUSE   /   C CLEAR   /   H HIDE";
+                const char* controls="HOLD LEFT CLICK TO ADD SAND   /   SCROLL TUNE   /   SPACE PAUSE   /   C CLEAR";
                 label(controls,(GetScreenWidth()-MeasureTextEx(font,controls,13*ui,.5f).x)*.5f,GetScreenHeight()-34*ui,13*ui);
                 if(options.dev)label("DEV",GetScreenWidth()-63*ui,26*ui,13*ui);
                 Rectangle button=sourceButton();
@@ -273,7 +286,8 @@ static int runListening(const Options& options) {
                             shown.pop_back();
                         label(shown.c_str(),line.x+8*ui,line.y+8*ui,13*ui);
                     }
-                    if(sources.empty())label("S: refresh sources",button.x+8*ui,button.y+button.height+46*ui,12*ui);
+                    if(sources.empty())label(sourcesQuery.valid()?"Finding microphones...":"No microphones found. R to refresh.",
+                                             button.x+8*ui,button.y+button.height+46*ui,12*ui);
                 }
             }
             if(!monitor.error.empty())centered(font,"Cannot hear the output. Press R to reconnect.",GetScreenWidth()*.5f,GetScreenHeight()-59*ui,16*ui,{221,173,114,255});

@@ -49,9 +49,10 @@ desktop through the window.
   cannot hold the route. Routing is rechecked every three seconds. `source`
   reports the resolved capture source. `requested_source` is `auto` or the
   explicitly selected source name. `sources_open` reports the picker state;
-  `available_sources` lists names, labels, and whether each is a recording
-  input. `S` or the SOURCE button opens the picker. Automatic routing uses
-  playback outputs; recording inputs require explicit selection. `R` reconnects.
+  `available_sources` lists physical microphones; each entry's `input` flag is
+  true. `S` or the SOURCE button opens the picker, whose other entry is Auto
+  desktop audio. Automatic routing uses playback outputs; microphones require
+  explicit selection. `R` reconnects.
   Silence is a valid, connected state.
 - Capture is two channels folded to one here rather than a mono stream from
   PulseAudio, which would average every channel the sink has: on a 7.1 output
@@ -76,21 +77,21 @@ Every grain has its own position, velocity, and local vibration. The force and
 occupancy grids only let those grains sample the plate and nearby crowding; they
 do not store sand. The surface fills the window, including its corners.
 `field_width` and `field_height` are the lookup grid dimensions and `grain_px`
-is the size of a visible grain. The slider changes the actual grain count, and
-resizing rebuilds and levels the tray. `gpu_relief` records GPU rendering.
+is the size of a visible grain. The tray starts empty; holding left click adds
+one grain immediately and another every 20 ms. The slider changes grain size,
+and resizing or moving it clears the tray. `gpu_relief` records GPU rendering.
 
 `surface` is always `plate`; both `--listen` and `--chladni` open the sound
-table. `bed` is one grain per cell in a levelled tray. `stateful_grains` records
+table. `bed` is zero for the empty starting tray. `stateful_grains` records
 the particle model, `grain_count` its exact size, `moving_grains` the particles
 with nontrivial speed, and `grain_updates` the total individual updates.
-`paused` is the space bar, `clears` counts levellings from `C`, and `strokes`
+`paused` is the space bar, `clears` counts emptyings from `C`, and `strokes`
 and `sweeps` count active frames and full passes over all grains.
 
 - `sand_mass` is the exact particle count divided by the tray's cell count; it
-  stays at `bed` because no update creates or deletes a grain. `sand_spread` is
+  rises when the user places sand and otherwise remains constant. `sand_spread` is
   the standard deviation of per-cell occupancy, measured from every grain every
-  quarter second. A positive spread shows that grains have left their level
-  starting positions and gathered into a figure.
+  quarter second. A positive spread shows uneven placement or gathering.
 
 ### The Chladni plate
 

@@ -118,9 +118,25 @@ public:
             };
             std::string name=field("Name: "),description=field("Description: ");
             if(name.empty())continue;
-            bool input=field("Monitor of Sink: ")=="n/a";
+            // Auto already follows desktop playback. The picker is for real
+            // recording devices, never output monitors or virtual loopbacks.
+            if(field("Monitor of Sink: ")!="n/a"
+               ||block.find("node.virtual = \"true\"")!=std::string::npos)continue;
             if(description.empty())description=name;
-            choices.push_back({name,(input?"INPUT: ":"OUTPUT: ")+description,input});
+            std::string active=field("Active Port: ");
+            if(!active.empty()&&description.find("Webcam")==std::string::npos) {
+                std::string marker="\n\t\t"+active+": ";
+                size_t port=block.find(marker);
+                if(port!=std::string::npos) {
+                    size_t first=port+marker.size(),last=block.find('\n',first);
+                    size_t details=block.find(" (",first);
+                    if(details!=std::string::npos&&(last==std::string::npos||details<last))last=details;
+                    std::string portName=block.substr(first,last==std::string::npos?std::string::npos:last-first);
+                    while(!portName.empty()&&portName.back()==' ')portName.pop_back();
+                    if(portName.find("Microphone")!=std::string::npos)description=portName+" ("+description+")";
+                }
+            }
+            choices.push_back({name,"MIC: "+description,true});
         }
         return choices;
     }

@@ -85,8 +85,9 @@ make listen            # the sound-driven Chladni table
 make plate             # same table, alternate launch command
 ```
 
-A sand surface fills the entire window, edge to edge. The background is
-transparent, so cleared areas reveal the desktop behind the window.
+The sound table starts empty. Hold left click over the window to place one
+grain immediately and another every 20 ms while held. The background is
+transparent, so empty areas reveal the desktop behind the window.
 
 **The plate** is the tray itself shaking. A few seconds of the music's measured
 pitch select a standing-wave approximation for this window's width and height.
@@ -94,23 +95,24 @@ Lower pitches select broad figures and higher pitches select finer ones. The
 pattern stays still while sand walks off the shaking parts and gathers on the
 quiet lines. Nearly coincident rectangular modes can combine into curved lines;
 unrelated modes do not blur the figure. Scroll to tune the plate. Grains move
-rather than a pattern being drawn, so the tray holds exactly as many as it
-started with.
+rather than a pattern being drawn; the plate does not create or remove any of
+the sand you place.
 
 Every visible grain has its own position, velocity, and local vibration. The
 plate shakes each one; crowded grains push outward instead of collapsing into a
 single line. The **grain slider** at the bottom left sets their size, from about
-one pixel to four pixels. Finer settings create more independent grains and can
-run slower. Moving the slider or resizing the window levels and refills the
-surface. The window's proportions determine the rectangular plate modes; the
+one pixel to four pixels. Finer settings allow more independent grains and can
+run slower. Moving the slider or resizing the window clears the tray. The
+window's proportions determine the rectangular plate modes; the
 controls overlay the sand.
 
 Silence stops the shaking and the sand keeps its figure: there is
-no fade and no timer. `Space` pauses, `C` levels the tray, drag the grain slider
+no fade or motion timer. `Space` pauses, `C` empties the tray, drag the grain slider
 to change how coarse the sand is, `R` reconnects to the
 music output, `S` opens the source picker, `H` hides the caption, `F11` toggles
-fullscreen and `Escape` exits. The picker groups output monitors and recording
-inputs. A microphone is captured only after you select it explicitly.
+fullscreen and `Escape` exits. The picker offers Auto desktop audio and the
+available physical microphones; output devices and virtual loopbacks are hidden.
+A microphone is captured only after you select it explicitly.
 Listening does not change your player or volume, save audio, or alter campaign
 progress. These are measured frequency bands,
 transients and a tracked pitch — not instrument separation or song

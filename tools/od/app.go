@@ -186,13 +186,20 @@ func Launch(root, name string, args ...string) (*App, error) {
 		app.Close()
 		return nil, fmt.Errorf("window never appeared (see %s)", app.logPath)
 	}
+	if name == "listening" {
+		_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+	}
 	app.focus()
 	time.Sleep(600 * time.Millisecond) // settle focus before the first input
 	app.RefreshSize()
 	// Park the pointer somewhere harmless. xdotool --clearmodifiers can restore
 	// a held button as a synthesized click, and a pointer left sitting over an
 	// orbit node turns the next keystroke into a descent.
-	_ = xdo("mousemove", "--window", app.window, "6", "6")
+	if name == "listening" {
+		_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+	} else {
+		_ = xdo("mousemove", "--window", app.window, "6", "6")
+	}
 	time.Sleep(1900 * time.Millisecond) // first frames, audio device, first bake
 	return app, nil
 }

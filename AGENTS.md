@@ -4,8 +4,39 @@ Applies to `/home/quartermeat/work/orbital-drift`. The home `AGENTS.md` still
 governs anything not covered here.
 
 Latest session handoff: [docs/HANDOFF.md](docs/HANDOFF.md). The source version is
-v0.24.0. Older milestone descriptions below are
+v0.25.0. Older milestone descriptions below are
 historical; consult the handoff, README, and current code for shipped behavior.
+
+## Update — October 4: place sand by hand
+
+The user asked for an empty sound table at startup and for holding left click
+on the window to create one grain at a time on a timer. Preserve the current
+source-picker edits and untracked garden header. Implement placement in the
+particle model and listening input loop, keep controls from depositing sand,
+then update the focused listening checks and documentation. Verification and
+remaining local changes will be recorded here when done.
+
+Done: the tray starts empty, a press places immediately, and a held press adds
+one grain every 20 ms up to the grid capacity. `C`, resize and grain-size
+changes empty the tray. The source button and grain slider do not paint. The
+state keeps `bed=0`; `grain_count` and `sand_mass` grow only through placement.
+The focused build, listening unit test, interface check and live listening
+check passed. The live check verified timed placement, release, audio motion,
+conservation and clearing; its app capture was visually inspected. At this
+point, the changes were uncommitted. The earlier source-picker edits and
+unrelated untracked garden header were preserved. The subsequent v0.25.0
+release is recorded below.
+
+## Update — October 4: prepare v0.25.0
+
+The user authorized committing and pushing the sound-table work. Version
+0.25.0 includes the empty tray, timed grain placement, the earlier source-picker
+improvements, documentation, and focused live-check updates. The untracked
+`src/listening_garden.hpp` is a superseded, unrelated prototype and is excluded
+from the commit. Full `make ci` passed in 114 seconds after the live check was
+made resilient to a window-manager resize during the tone; recognition met its
+9-of-12 floor. `git diff --check` passed. Create the annotated `v0.25.0` tag
+with the versioned commit and push both. Do not add the garden header.
 
 **Consult Claude Code directly; don't pass notes.** More than one agent works
 in this tree (Claude Code and Codex). When a task needs a decision, context or a
@@ -341,22 +372,25 @@ a sheet to `artifacts/figures.png` for judging it by eye.
 `--listen` and `--chladni` open one sound table driven by desktop audio. Every
 visible grain has a persistent position, velocity and local vibration in
 `src/particle_sand.hpp`; the force and occupancy grids guide individual grains
-but do not store sand. The grain slider changes grain size and count. The
+but do not store sand. The tray starts empty; holding left click places grains
+every 20 ms. The grain slider changes grain size and capacity. The
 Chladni plate is the only mechanism: the user abandoned the rolling ball on
 October 3, 2026. Both launch flags open the plate, and `P` has no action.
 The sound table fills the whole window. There is no circular clipping or rim.
-Separate rectangular cosine modes use the window aspect; resizing refills the
+Separate rectangular cosine modes use the window aspect; resizing clears the
 surface and keeps the chosen grain size. The slider ranges from one to four
 pixels.
 The listening window has a transparent framebuffer: exposed ground reveals the
-desktop behind it. The source picker lists output monitors and recording inputs;
-automatic routing remains output-only, while microphones require explicit
-selection. Source discovery runs off the render thread.
+desktop behind it. The source picker offers Auto desktop audio and physical
+microphones only; output monitors and virtual loopbacks are hidden. Automatic
+routing remains output-only, while microphones require explicit selection.
+Source discovery runs off the render thread.
 Each of these cost a session to find, so do not undo them casually:
 
 - **Every grain is stateful.** Do not replace positions and velocities with
   counts or move groups of grains in 2x2 blocks. `grain_updates` must increase
-  by `grain_count` on every active sweep; `sand_mass` must remain constant.
+  by `grain_count` on every active sweep; `sand_mass` remains constant between
+  user placement and clears.
 - **Crowding matters.** An attractive nodal force without pressure collapses
   thousands of grains into a hairline. The occupancy lookup pushes crowded
   grains outward into visible piles without creating or deleting them.
