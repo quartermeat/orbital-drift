@@ -1,5 +1,20 @@
 # Session handoff — September 20, 2026
 
+## Update — October 4: individually stateful sand
+
+The sound table now stores a persistent position, velocity, and local vibration
+for every visible grain. The default 1280×900 window at 4 px grain size has
+72,000 independent grains. A force grid only supplies the standing-wave slope;
+an occupancy grid supplies crowding pressure. Neither grid stores sand or moves
+counts between cells. The CPU updates every grain on every active frame and a
+GPU point draw shows the grains directly. Silence and pause preserve positions.
+
+`listening.grain_count`, `moving_grains`, and `grain_updates` expose the model.
+At the default size, the first live run was around 52 FPS on the RTX 3090 Ti;
+the finest grain setting creates many more grains. Efficiency is a separate next
+step. The older 2×2 block shader and test described below are superseded but
+their uncommitted source files were left untouched.
+
 ## Update — September 21: listening island prototype
 
 The user asked for a playful fiddling world aware of whatever music is playing,
@@ -178,3 +193,141 @@ AGENTS.md pointers are intentionally local, uncommitted memory updates; no new
 commit or push was requested at shutdown. Preserve them in subsequent work and
 apply normal version/tag rules if committing later. No remaining publication
 work is required. The temporary preview server on port 8765 was stopped.
+
+## Update — October 3: uncommitted capture fix, and the ball is going
+
+Written by Claude Code for whoever picks this up next (Codex is removing the
+ball).
+
+**Uncommitted work in the tree, keep it.** Late on October 2 a fix to the sand
+table's audio capture was made and not committed: `src/desktop_monitor.hpp`,
+`src/listening.hpp`, `tests/listening_test.cpp`, `README.md`,
+`docs/interfaces/state.md`, `AGENTS.md`. Full `make ci` passed on it on
+October 3 (120s, recognition 9 of 12). Build on it and commit it; do not reset
+or check those files out. What it does:
+
+- `--monitor auto` now captures `@DEFAULT_MONITOR@`, the desktop's own output,
+  by default. Only after five seconds of silence there does it hunt for a
+  player routed through its own sink.
+- The hunt reads the long `pactl list sink-inputs` form and skips corked and
+  muted streams, so a paused player no longer wins the route.
+- `parec` captures two channels, folded to mono in-process. Asking for mono
+  made PulseAudio average all eight channels of the 7.1 output, dividing the
+  music by the silent surrounds, which made the monitor look dead.
+
+Checked live on October 3: windowed `--listen` connected to
+`@DEFAULT_MONITOR@` with real signal (rms ~0.01–0.08) from the user's music.
+
+`src/listening_garden.hpp` is an untracked leftover from September 21, the
+three-creature garden the sand table replaced. Nothing includes it; it can be
+deleted.
+
+**Direction from the user.** Drop the magnetic ball; work with the sound
+(Chladni) table only. The user likes the one-grain-per-pixel granularity
+because it reminds them of their cellular automaton, Life's Sandbox
+(`~/work/cell_auto_port`, Go/Ebitengine, Life/Zombie/Sick/Dead/Wall cells).
+The tray-as-grid-of-matter framing is the way forward: more kinds of matter
+with their own interaction rules, moved by sound.
+
+A sand table window may be open on the desktop (`--dev --listen --windowed`);
+`make ci`'s live checks will close it.
+
+## Update — October 3: AGENTS.md now requires these notes
+
+Claude Code, at the user's request, added two rules near the top of
+`AGENTS.md` (uncommitted, alongside the capture fix above):
+
+- Re-read this file before every response; Claude Code and Codex both work in
+  this tree and leave each other notes here.
+- Any work in the repo requires a dated `## Update` section here: what you are
+  about to change before starting, then what changed, what was verified, what is
+  uncommitted, and what must not be undone when you stop.
+
+No code changed. Not verified by `make ci` (documentation only).
+
+## Update — October 3: Codex removes the rolling ball
+
+The user's request is to abandon the ball altogether and keep only the sound
+table. Changes are in `src/listening.hpp`, `src/main.cpp`, the sand renderer,
+`Makefile`, listening tests, Go state/check code, the generated state fixture,
+README and state documentation. The ball motion header and carving shader are
+removed. Both `--listen` and `--chladni` now open the plate; `P` does nothing.
+Grain size, tuning, pause, clear, and the Chladni transport remain.
+
+The new shared-agent note rule arrived while these edits were underway; this
+entry records the work as soon as that rule was read. The prior capture fixes
+and Claude Code's notes are preserved, as is the unrelated untracked garden
+header. `make interfaces` and full `make ci` passed (123.4 seconds), including
+live checks of plate startup through `--listen`, the retired P shortcut leaving
+the figure intact, pitch response, conserved sand, silence, grain size and
+clear. Recognition passed its existing 9-of-12 floor. `git diff --check` passed.
+All changes remain uncommitted; no version bump, commit, tag or push was made.
+Do not restore the ball or its surface toggle.
+
+## Update — October 3: Codex expands the sound table to the window
+
+Requested: remove the circular boundary and cover the entire window with the
+vibrating sand surface. Plan: update `src/listening.hpp`, `src/chladni.hpp`,
+the sand/plate shaders, listening tests and state documentation for a rectangular
+field, including corners and resize behavior. Preserve the capture fixes and
+ball removal.
+
+Implemented: sand covers every window pixel, with a rectangular grid and no
+circular mask/rim/shadow in rendering, transport, or measurement. Grain size is
+1–4 screen pixels; resizing refills the grid at the selected size. Both CPU and
+GPU use paired cosine modes in normalized window coordinates, selected by pitch,
+tuning and aspect-dependent relative frequency. Modes do not rotate. State now
+reports `field_width`, `field_height`, `mode_n`, `mode_m`, `mode_sign`, and
+`mode_frequency`; the generated fixture and interface documentation match.
+Controls have outlined light text to remain readable over sand and bare surface.
+
+Unit tests cover rectangular nodes, aspect-dependent modes, exact conservation
+on a 97x63 grid, and transport in all four corners. The live listening check
+passed including screenshot corner coverage, pitch response, conservation,
+silence, grain size, and a 901x701 resize. Inspected the rectangular figure in
+`artifacts/sound-table.png`. Full CI initially hit campaign startup segfaults;
+a direct campaign run passed. The next full run passed listening but failed
+the campaign revisit claim check. A final full run with the caption contrast
+fix is underway. All changes remain uncommitted; preserve earlier capture
+fixes, ball removal, and the unrelated untracked garden header.
+
+## Update — October 3: Claude Code, for Codex: the window needs rectangular-plate patterns
+
+The user chose this explicitly. Removing the ring is not enough; the figures
+themselves must be those of a rectangular plate, not the circular ones.
+`src/chladni.hpp` currently builds circular-membrane modes (`besselJ` in r,
+`cos(lobes*angle)`), and extending those into the corners would only give
+rings stretched across a rectangle. Replace the mode shape for the window field:
+
+- Use normalized coordinates over the window, u = x/W, v = y/H in [0,1].
+- Use the classic free-edge Chladni approximation:
+  `cos(n*pi*u)*cos(m*pi*v) ± cos(m*pi*u)*cos(n*pi*v)`. The ± pair gives the
+  crossed and diagonal figures from the square-plate photographs; on a
+  non-square window the shapes stretch with the aspect ratio, as a real
+  rectangular plate's do.
+- Pitch should select (n,m) by plate frequency, which goes as
+  (n/W)^2 + (m/H)^2. Then the window's proportions decide which figures exist,
+  and resizing changes them.
+- Keep what AGENTS.md already says about the plate: a standing wave stands
+  still (no rotation; `spin` has no meaning here), and sand settles on the
+  nodal lines. Corners and edges are antinodes for free edges; sand collects
+  away from them.
+
+This is a direction note only; no code changed by Claude Code.
+
+## Update — October 3: keep sound-table verification focused
+
+The user objected directly to time spent on orbital-game tests while requesting
+sound-table changes. Updated AGENTS.md to use focused build, listening unit,
+interface and live-listening checks for sound-table-only work. Do not continue
+investigating campaign revisit failures in this task. Final focused sound-table
+check is running; its private output sink needed desktop audio access outside
+the sandbox. The P regression test now waits for the GPU gauge's last update
+before comparing the held figure, avoiding a stale measurement race. The focused
+live check passed once during full CI, then later runs failed at low-tone
+capture or steady-tone timing although the resulting live state and screenshot
+showed the plate hearing and sorting the test tone. The harness now waits for
+measured bands and allows more time for the steady-tone state to arrive. Do not
+claim the final live rerun passed without running it; the table's unit, shader
+build, interface, screenshot corner and earlier live checks passed. No changes
+were committed or pushed.

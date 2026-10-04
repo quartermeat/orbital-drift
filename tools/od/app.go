@@ -30,13 +30,14 @@ const (
 )
 
 type State struct {
-	Mode           string          `json:"mode,omitempty"`
-	Listening      *ListeningState `json:"listening,omitempty"`
-	FPS            int             `json:"fps"`
-	Playing        bool            `json:"playing"`
-	RenderedFrames uint64          `json:"rendered_frames"`
-	OutputRMS      float64         `json:"output_rms"`
-	Tracks         []struct {
+	Mode                  string          `json:"mode,omitempty"`
+	Listening             *ListeningState `json:"listening,omitempty"`
+	TransparentBackground bool            `json:"transparent_background,omitempty"`
+	FPS                   int             `json:"fps"`
+	Playing               bool            `json:"playing"`
+	RenderedFrames        uint64          `json:"rendered_frames"`
+	OutputRMS             float64         `json:"output_rms"`
+	Tracks                []struct {
 		Name     string  `json:"name"`
 		Enabled  bool    `json:"enabled"`
 		Unlocked bool    `json:"unlocked"`
@@ -72,9 +73,16 @@ type State struct {
 }
 
 type ListeningState struct {
-	Connected  bool    `json:"connected"`
-	Source     string  `json:"source"`
-	Error      string  `json:"error"`
+	Connected        bool   `json:"connected"`
+	Source           string `json:"source"`
+	Error            string `json:"error"`
+	RequestedSource  string `json:"requested_source"`
+	SourcesOpen      bool   `json:"sources_open"`
+	AvailableSources []struct {
+		Name  string `json:"name"`
+		Label string `json:"label"`
+		Input bool   `json:"input"`
+	} `json:"available_sources"`
 	SampleRate int     `json:"sample_rate"`
 	Frames     uint64  `json:"frames"`
 	RMS        float64 `json:"rms"`
@@ -87,36 +95,33 @@ type ListeningState struct {
 	ToneHz     float64 `json:"tone_hz"`
 	Clarity    float64 `json:"clarity"`
 
-	// The tray, and which mechanism currently has it.
-	Surface    string  `json:"surface"`
-	FieldSize  int     `json:"field_size"`
-	GPURelief  bool    `json:"gpu_relief"`
-	SandMass   float64 `json:"sand_mass"`
-	SandSpread float64 `json:"sand_spread"`
-	Bed        float64 `json:"bed"`
-	Paused     bool    `json:"paused"`
-	Clears     int     `json:"clears"`
-	Strokes    uint64  `json:"strokes"`
-	Sweeps     uint64  `json:"sweeps"`
-	GrainPx    float64 `json:"grain_px"`
-
-	// The raking ball.
-	BallX       float64 `json:"ball_x"`
-	BallY       float64 `json:"ball_y"`
-	BallScreenX int     `json:"ball_screen_x"`
-	BallScreenY int     `json:"ball_screen_y"`
-	Distance    float64 `json:"distance"`
-	Speed       float64 `json:"speed"`
-	Drive       float64 `json:"drive"`
+	// The sound table; Surface is always "plate".
+	Surface        string  `json:"surface"`
+	FieldWidth     int     `json:"field_width"`
+	FieldHeight    int     `json:"field_height"`
+	GPURelief      bool    `json:"gpu_relief"`
+	SandMass       float64 `json:"sand_mass"`
+	SandSpread     float64 `json:"sand_spread"`
+	Bed            float64 `json:"bed"`
+	Paused         bool    `json:"paused"`
+	Clears         int     `json:"clears"`
+	Strokes        uint64  `json:"strokes"`
+	Sweeps         uint64  `json:"sweeps"`
+	GrainPx        float64 `json:"grain_px"`
+	StatefulGrains bool    `json:"stateful_grains"`
+	GrainCount     uint64  `json:"grain_count"`
+	MovingGrains   uint64  `json:"moving_grains"`
+	GrainUpdates   uint64  `json:"grain_updates"`
 
 	// The shaking plate.
-	Rings        float64 `json:"rings"`
-	Lobes        int     `json:"lobes"`
-	Spin         float64 `json:"spin"`
-	Harmonic     float64 `json:"harmonic"`
-	Agitation    float64 `json:"agitation"`
-	Tuning       float64 `json:"tuning"`
-	Reconfigures int     `json:"reconfigures"`
+	ModeN         int     `json:"mode_n"`
+	ModeM         int     `json:"mode_m"`
+	ModeSign      int     `json:"mode_sign"`
+	ModeFrequency float64 `json:"mode_frequency"`
+	Harmonic      float64 `json:"harmonic"`
+	Agitation     float64 `json:"agitation"`
+	Tuning        float64 `json:"tuning"`
+	Reconfigures  int     `json:"reconfigures"`
 }
 
 type App struct {
@@ -183,7 +188,19 @@ func Launch(root, name string, args ...string) (*App, error) {
 	}
 	app.focus()
 	time.Sleep(600 * time.Millisecond) // settle focus before the first input
-	geometry, _ := xdoOut("getwindowgeometry", "--shell", app.window)
+	app.RefreshSize()
+	// Park the pointer somewhere harmless. xdotool --clearmodifiers can restore
+	// a held button as a synthesized click, and a pointer left sitting over an
+	// orbit node turns the next keystroke into a descent.
+	_ = xdo("mousemove", "--window", app.window, "6", "6")
+	time.Sleep(1900 * time.Millisecond) // first frames, audio device, first bake
+	return app, nil
+}
+
+// The window manager may tile or resize a newly opened window after launch.
+// Input coordinates must use its current geometry, not the startup geometry.
+func (a *App) RefreshSize() {
+	geometry, _ := xdoOut("getwindowgeometry", "--shell", a.window)
 	for _, line := range strings.Split(geometry, "\n") {
 		parts := strings.SplitN(strings.TrimSpace(line), "=", 2)
 		if len(parts) != 2 {
@@ -192,17 +209,11 @@ func Launch(root, name string, args ...string) (*App, error) {
 		value, _ := strconv.Atoi(parts[1])
 		switch parts[0] {
 		case "WIDTH":
-			app.Width = value
+			a.Width = value
 		case "HEIGHT":
-			app.Height = value
+			a.Height = value
 		}
 	}
-	// Park the pointer somewhere harmless. xdotool --clearmodifiers can restore
-	// a held button as a synthesized click, and a pointer left sitting over an
-	// orbit node turns the next keystroke into a descent.
-	_ = xdo("mousemove", "--window", app.window, "6", "6")
-	time.Sleep(1900 * time.Millisecond) // first frames, audio device, first bake
-	return app, nil
 }
 
 func (a *App) Close() {

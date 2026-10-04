@@ -81,59 +81,61 @@ setup can also copy the original stems from `~/Music/Orbital Drift/audio/`.
 ### Sand table (local development prototype)
 
 ```sh
-make listen            # the raking ball
-make plate             # the Chladni plate
+make listen            # the sound-driven Chladni table
+make plate             # same table, alternate launch command
 ```
 
-A tray of sand on the GPU, driven by music already playing on the desktop. Two
-mechanisms take turns with it, and `P` hands the tray from one to the other.
+A sand surface fills the entire window, edge to edge. The background is
+transparent, so cleared areas reveal the desktop behind the window.
 
-**The ball** is a magnet under the tray. It follows a rosette whose radius,
-drift and speed come from the mix, raking grooves and ridges as it goes. Drag
-inside the tray to steer it by hand, and scroll to change how hard it is driven.
+**The plate** is the tray itself shaking. A few seconds of the music's measured
+pitch select a standing-wave approximation for this window's width and height.
+Lower pitches select broad figures and higher pitches select finer ones. The
+pattern stays still while sand walks off the shaking parts and gathers on the
+quiet lines. Nearly coincident rectangular modes can combine into curved lines;
+unrelated modes do not blur the figure. Scroll to tune the plate. Grains move
+rather than a pattern being drawn, so the tray holds exactly as many as it
+started with.
 
-**The plate** is the tray itself shaking. The pitch of whatever is playing picks
-a standing wave — a low note rings the plate in a few wide bands, a high one
-breaks it into many — and the sand walks off the parts that are shaking until
-only the still lines are holding any, which is a Chladni figure. Scroll to tune
-the plate against the note. It moves grains rather than drawing a pattern, so
-the tray holds exactly as many as it started with.
+Every visible grain has its own position, velocity, and local vibration. The
+plate shakes each one; crowded grains push outward instead of collapsing into a
+single line. The **grain slider** at the bottom left sets their size, from about
+one pixel to four pixels. Finer settings create more independent grains and can
+run slower. Moving the slider or resizing the window levels and refills the
+surface. The window's proportions determine the rectangular plate modes; the
+controls overlay the sand.
 
-The tray is a grid of matter, one cell to the pixel, each holding a whole number
-of grains; sand is simply the only kind of matter in it so far. The **grain
-slider** at the bottom left sets how big a cell is, from a grain a pixel up to a
-few pixels across. Coarse grain gives the cleanest figures — the sand has less
-ground to cross, so the nodal lines come out sharp — while fine grain is slower
-and dustier. Moving it rebuilds the tray and levels it.
-
-Either way, silence stops the mechanism and the sand keeps its figure: there is
+Silence stops the shaking and the sand keeps its figure: there is
 no fade and no timer. `Space` pauses, `C` levels the tray, drag the grain slider
 to change how coarse the sand is, `R` reconnects to the
-music output, `H` hides the caption, `F11` toggles fullscreen and `Escape` exits.
-Listening does not change your player or volume, save any audio, open a
-microphone, or alter campaign progress. These are measured frequency bands,
+music output, `S` opens the source picker, `H` hides the caption, `F11` toggles
+fullscreen and `Escape` exits. The picker groups output monitors and recording
+inputs. A microphone is captured only after you select it explicitly.
+Listening does not change your player or volume, save audio, or alter campaign
+progress. These are measured frequency bands,
 transients and a tracked pitch — not instrument separation or song
 identification. This prototype is not in the published v0.22.0 bundles.
 
 Requires `parec` and `pactl` (Debian/Ubuntu package `pulseaudio-utils`), a
-running PulseAudio or PipeWire-Pulse desktop, and a GPU that can render to
-floating point textures. To select another output monitor explicitly:
+running PulseAudio or PipeWire-Pulse desktop, and OpenGL 3.3 point rendering.
+To select another output monitor explicitly:
 
 ```sh
 ./build/orbital-drift --dev --chladni --monitor easyeffects_sink.monitor
 ```
 
-The default `--monitor auto` follows the output of the first listed playback
-stream, including Easy Effects, and checks for route changes every three seconds.
-If several players use different outputs, choose a monitor explicitly. With no
-playback streams it uses `@DEFAULT_MONITOR@`. Only output monitor names are
-accepted; there is no microphone fallback. Monitor semantics follow the upstream
+The default `--monitor auto` captures the desktop's own output, which carries
+whatever you are listening to whichever program is playing it. If nothing
+reaches that output for a few seconds it looks for a player routed through a
+sink of its own and follows the stream that is actually sounding, skipping
+paused and muted ones. Routing is rechecked every three seconds. Automatic mode
+never selects a microphone. Capture semantics follow the upstream
 [PulseAudio client](https://github.com/pulseaudio/pulseaudio/blob/master/src/utils/pacat.c).
 State under `listening` in `artifacts/state.json` reports the connection, the
-measured features, the tracked pitch, which mechanism holds the tray, the plate's
+measured features, the tracked pitch, the rectangular grid dimensions, the plate's
 mode, and how much sand is on the tray and how far from flat it lies. The CI
 listening check sends tones to a temporary, inaudible output sink and checks
-capture, silence, the carving ball, and that the plate sorts conserved sand onto
+capture, silence, and that the plate sorts conserved sand onto
 its nodal lines.
 
 ### Original campaign

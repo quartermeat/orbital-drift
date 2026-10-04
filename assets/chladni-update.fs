@@ -11,35 +11,19 @@
 in vec2 fragTexCoord;
 out vec4 finalColor;
 uniform sampler2D texture0;
-uniform float field;        // cells across the tray
+uniform vec2 field;         // width and height in cells
 uniform float phase;        // 0 or 1: which way the blocks are laid out
 uniform float salt;         // changes every sweep
 uniform float push;         // how hard the shaking throws a grain
 uniform float agitation;
 uniform float reposeGap;
-uniform vec3 mode;          // rings, lobes, spin
-uniform vec3 harmonic;
+uniform vec3 mode;          // n, m, phase sign of a rectangular resonance
+uniform vec3 harmonic;      // a nearby resonance, only when nearly degenerate
 uniform float harmonicWeight;
 
-float besselJ(float m,float x) {
-    x=abs(x);
-    float series=0.0;
-    if(x<7.5) {
-        float term=1.0;
-        for(int i=1;i<=12;++i){if(float(i)>m)break;term*=x*0.5/float(i);}
-        series=term;
-        float quarter=x*x*0.25;
-        for(int k=1;k<=18;++k){term*=-quarter/(float(k)*(float(k)+m));series+=term;}
-    }
-    float wave=x>1e-4?sqrt(2.0/(3.14159265*x))*cos(x-m*1.57079633-0.78539816):0.0;
-    float t=clamp((x-5.0)*0.5,0.0,1.0);
-    return series*(1.0-t*t*(3.0-2.0*t))+wave*t*t*(3.0-2.0*t);
-}
 float standing(vec3 m,vec2 p) {
-    float argument=m.x*length(p);
-    float radial=besselJ(m.y,argument)*sqrt(max(1.0,argument));
-    float angle=m.y>0.5?atan(p.y,p.x):0.0;
-    return radial*cos(m.y*angle+m.z);
+    vec2 angle=p*3.14159265;
+    return m.z*cos(m.x*angle.x)*cos(m.y*angle.y);
 }
 float energyAt(vec2 p) {
     float d=standing(mode,p);
@@ -47,7 +31,6 @@ float energyAt(vec2 p) {
     d/=1.0+harmonicWeight;
     return clamp(d*d*0.55,0.0,1.0);
 }
-bool onPlate(vec2 p) { return dot(p,p)<0.999*0.999; }
 uint scramble(uint x) {
     x=(x^61u)^(x>>16u);x*=9u;x=x^(x>>4u);x*=0x27d4eb2du;x=x^(x>>15u);return x;
 }
@@ -60,7 +43,6 @@ float hash(ivec2 block,float seed) {
 
 void main() {
     ivec2 cell=ivec2(gl_FragCoord.xy);
-    int side=int(field);
     int offset=int(phase);
     ivec2 origin=((cell-ivec2(offset))>>1)*2+ivec2(offset);
     ivec2 seat=cell-origin;
@@ -70,9 +52,8 @@ void main() {
     for(int i=0;i<4;++i) {
         ivec2 at=origin+ivec2(i&1,i>>1);
         inside[i]=false;count[i]=0.0;energy[i]=0.0;
-        if(at.x<0||at.y<0||at.x>=side||at.y>=side)continue;
-        vec2 p=(vec2(at)+0.5)/field*2.0-1.0;
-        if(!onPlate(p))continue;
+        if(at.x<0||at.y<0||at.x>=int(field.x)||at.y>=int(field.y))continue;
+        vec2 p=(vec2(at)+0.5)/field;
         inside[i]=true;
         count[i]=texelFetch(texture0,at,0).r;
         energy[i]=energyAt(p);

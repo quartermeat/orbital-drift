@@ -6,15 +6,14 @@
 in vec2 fragTexCoord;
 out vec4 finalColor;
 uniform sampler2D texture0;
-uniform float cell;
 void main() {
-    vec2 base=fragTexCoord-vec2(cell*0.5);
+    ivec2 field=textureSize(texture0,0);
+    ivec2 patch=ivec2(gl_FragCoord.xy);
+    // The 32x32 gauge partitions every cell exactly once, including the edges.
+    ivec2 first=patch*field/32,last=(patch+1)*field/32;
     float grains=0.0,squares=0.0,counted=0.0;
-    for(int y=0;y<24;++y)for(int x=0;x<24;++x) {
-        vec2 uv=base+vec2((float(x)+0.5)/24.0,(float(y)+0.5)/24.0)*cell;
-        vec2 p=uv*2.0-1.0;
-        if(dot(p,p)>=0.999*0.999)continue;
-        float n=texture(texture0,clamp(uv,vec2(0.0),vec2(1.0))).r;
+    for(int y=first.y;y<last.y;++y)for(int x=first.x;x<last.x;++x) {
+        float n=texelFetch(texture0,ivec2(x,y),0).r;
         grains+=n;squares+=n*n;counted+=1.0;
     }
     finalColor=vec4(grains,squares,counted,1.0);

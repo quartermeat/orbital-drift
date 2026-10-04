@@ -36,15 +36,26 @@ written against these fields. Notable ones earned the hard way:
 The campaign's mixer, track and progression fields are absent in this mode;
 the existing campaign-mode JSON stays unchanged. `fps`, `running`, renderer,
 fullscreen and dimensions remain available in either mode.
+`transparent_background` is true for listening mode: clear cells reveal the
+desktop through the window.
 
 - `connected`, `source`, `error`: monitor connection and readable failures.
-  The default `--monitor auto` selects the output sink of the first listed
-  playback stream (so Easy Effects routing is followed), checking every three
-  seconds. With no playback streams it uses `@DEFAULT_MONITOR@`. `source` always
-  reports the resolved capture source. An explicit `@DEFAULT_MONITOR@` captures
-  the default output; another named source must end in `.monitor`. There is no
-  input fallback. `R` reconnects. Silence is a valid, connected state. With
-  simultaneous playback on different outputs, use an explicit monitor to choose.
+  The default `--monitor auto` captures the desktop's own output,
+  `@DEFAULT_MONITOR@`, which carries everything audible whichever program made
+  it -- no guessing at which application was meant. Only when nothing has
+  reached that output for five seconds does it hunt for a player routed through
+  a sink of its own, and then it takes the sink of the first stream that is
+  actually sounding: a corked or muted stream is skipped, so a paused player
+  cannot hold the route. Routing is rechecked every three seconds. `source`
+  reports the resolved capture source. `requested_source` is `auto` or the
+  explicitly selected source name. `sources_open` reports the picker state;
+  `available_sources` lists names, labels, and whether each is a recording
+  input. `S` or the SOURCE button opens the picker. Automatic routing uses
+  playback outputs; recording inputs require explicit selection. `R` reconnects.
+  Silence is a valid, connected state.
+- Capture is two channels folded to one here rather than a mono stream from
+  PulseAudio, which would average every channel the sink has: on a 7.1 output
+  that divides the music by four silent surrounds and reads as a dead monitor.
 - `sample_rate` is 24000, `frames` counts captured mono samples. `rms` is the
   latest 512-sample RMS. `bass`, `body`, `air` and `pulse` are normalized measured
   responses, not separate instruments, beat-grid estimates or generated data.
@@ -61,52 +72,44 @@ fullscreen and dimensions remain available in either mode.
 
 ### The tray
 
-The tray is a grid of matter, one cell to the pixel, and each cell holds a whole
-number of grains. Sand is the only kind of matter in it so far. `field_size` is
-how many cells lie across it and `grain_px` how many screen pixels one of them
-covers, which the grain slider sets by rebuilding the tray rather than by
-blurring the picture. `gpu_relief` records that the relief is real geometry.
+Every grain has its own position, velocity, and local vibration. The force and
+occupancy grids only let those grains sample the plate and nearby crowding; they
+do not store sand. The surface fills the window, including its corners.
+`field_width` and `field_height` are the lookup grid dimensions and `grain_px`
+is the size of a visible grain. The slider changes the actual grain count, and
+resizing rebuilds and levels the tray. `gpu_relief` records GPU rendering.
 
-Two mechanisms take turns with the tray, named by `surface`, and `P` hands it
-from one to the other. Handing it over levels it, because the two want different
-depths: `bed` is the grains a levelled cell holds. `paused` is the space bar,
-`clears` counts levellings from `C`, `strokes` counts frames of work and
-`sweeps` the plate's individual passes over the grid.
+`surface` is always `plate`; both `--listen` and `--chladni` open the sound
+table. `bed` is one grain per cell in a levelled tray. `stateful_grains` records
+the particle model, `grain_count` its exact size, `moving_grains` the particles
+with nontrivial speed, and `grain_updates` the total individual updates.
+`paused` is the space bar, `clears` counts levellings from `C`, and `strokes`
+and `sweeps` count active frames and full passes over all grains.
 
-- `sand_mass` and `sand_spread` are the mean and standard deviation of the
-  grains per cell over the tray, measured on the GPU every quarter second rather
-  than assumed. Mass is the honest test of the plate: grains move between cells
-  in 2x2 blocks and are never created, so the mean holds its bed for as long as
-  it runs. The ball is a carve rather than a transport and does add sand, so the
-  conservation reading belongs to the plate. Spread is how far from level the
-  tray lies, which is the difference between a figure and an excuse -- a plate
-  reporting agitation with no spread has done nothing.
-- The gauge samples the tray rather than summing every cell, so the mass carries
-  a little sampling noise and reads a hair under the bed. Conservation is a
-  claim about it holding steady, not about the last decimal.
-
-### The raking ball
-
-`ball_x`/`ball_y` are the ball on the unit tray and `ball_screen_x`/`_y` are
-where it was actually drawn, so a driving script never reimplements the layout.
-`distance` and `speed` are its travel and current rate, `drive` the wheel.
-Silence stops the mechanism; the sand keeps what was carved.
+- `sand_mass` is the exact particle count divided by the tray's cell count; it
+  stays at `bed` because no update creates or deletes a grain. `sand_spread` is
+  the standard deviation of per-cell occupancy, measured from every grain every
+  quarter second. A positive spread shows that grains have left their level
+  starting positions and gathered into a figure.
 
 ### The Chladni plate
 
 The plate is a standing wave, and the sand walks off the parts of the tray that
 are shaking until only the still lines are left holding any.
 
-- `rings` is the radial wavenumber and `lobes` the number of diameters: pitch
-  chooses both, so a low note rings the plate in a few wide bands and a high one
-  breaks it into many. `lobes` is a whole number with a deadband, and
-  `reconfigures` counts how often the figure has had to jump to a new one.
-- `spin` is where the diameters point. It barely moves by design: a standing
-  wave stands still, and a figure that rotates smears into rings because the
-  sand can never settle onto a diameter.
-- `harmonic` is the weight of the second, brighter mode mixed into the first,
+- `mode_n`, `mode_m`, and `mode_sign` describe the selected rectangular
+  resonance: `sign*cos(n*pi*u)*cos(m*pi*v)` over normalized window coordinates.
+  Width and height are separate; there is no rotation or circular cutoff.
+- `mode_frequency` is the relative mode frequency `(n/aspect)^2 + m^2`, where
+  aspect is grid width divided by height. A three-second weighted pitch sample
+  and tuning choose the nearest mode, then the plate holds it for the next
+  sample. This is an illustrative plate model,
+  not a calibrated elastic-plate solver. `reconfigures` counts mode changes.
+- `harmonic` is the weight of a nearby resonance mixed into the first when the
+  two are nearly coincident,
   and `tuning` is the wheel. `agitation` is how hard the plate is being shaken:
   zero in silence, which freezes the figure exactly rather than fading it.
 
-Audio samples exist only in transient memory. No output stream or microphone
-is opened by listening mode. Playback, volume and campaign saves are untouched.
+Audio samples exist only in transient memory. An explicitly selected input can
+open a microphone; automatic listening uses output monitors. Playback, volume
+and campaign saves are untouched.

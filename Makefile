@@ -11,7 +11,7 @@ $(RAYLIB)/raylib.h:
 	python3 scripts/setup.py
 $(RAYLIB)/libraylib.a: $(RAYLIB)/raylib.h
 	$(MAKE) -C $(RAYLIB) PLATFORM=PLATFORM_DESKTOP GRAPHICS=GRAPHICS_API_OPENGL_33 RAYLIB_LIBTYPE=STATIC -j4
-build/orbital-drift: src/main.cpp src/mixer.hpp src/hotreload.hpp src/progress.hpp src/scene.hpp src/campaign.hpp src/figure.hpp src/listening.hpp src/listening_audio.hpp src/sand_motion.hpp src/chladni.hpp src/desktop_monitor.hpp assets/space.fs assets/layers.conf assets/sand-update.fs assets/sand-render.fs assets/chladni-update.fs assets/sand-reduce.fs $(RAYLIB)/libraylib.a
+build/orbital-drift: src/main.cpp src/mixer.hpp src/hotreload.hpp src/progress.hpp src/scene.hpp src/campaign.hpp src/figure.hpp src/listening.hpp src/listening_audio.hpp src/chladni.hpp src/particle_sand.hpp src/desktop_monitor.hpp assets/space.fs assets/layers.conf assets/grain-points.vs assets/grain-points.fs $(RAYLIB)/libraylib.a
 	$(CXX) $(CXXFLAGS) -Isrc -isystem $(RAYLIB) src/main.cpp -o $@ $(LDLIBS)
 build/mixer-test: tests/mixer_test.cpp src/mixer.hpp
 	mkdir -p build
@@ -28,7 +28,7 @@ build/scene-test: tests/scene_test.cpp src/scene.hpp src/hotreload.hpp src/mixer
 build/campaign-test: tests/campaign_test.cpp src/campaign.hpp src/person.hpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -Isrc $< -o $@
-build/listening-test: tests/listening_test.cpp src/listening_audio.hpp src/sand_motion.hpp src/chladni.hpp src/desktop_monitor.hpp
+build/listening-test: tests/listening_test.cpp src/listening_audio.hpp src/chladni.hpp src/particle_sand.hpp src/desktop_monitor.hpp
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -Isrc $< -o $@
 test: build/mixer-test build/config-test build/progress-test build/scene-test build/campaign-test build/listening-test

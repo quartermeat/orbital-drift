@@ -3,9 +3,24 @@
 Applies to `/home/quartermeat/work/orbital-drift`. The home `AGENTS.md` still
 governs anything not covered here.
 
-Latest session handoff: [docs/HANDOFF.md](docs/HANDOFF.md). As of September 20,
-2026, the public release is v0.22.0. Older milestone descriptions below are
+Latest session handoff: [docs/HANDOFF.md](docs/HANDOFF.md). The source version is
+v0.24.0. Older milestone descriptions below are
 historical; consult the handoff, README, and current code for shipped behavior.
+
+**Consult Claude Code directly; don't pass notes.** More than one agent works
+in this tree (Claude Code and Codex). When a task needs a decision, context or a
+second opinion from the other side, ask it directly from the repo root:
+
+```sh
+claude -p "your question, with the files and context it needs" \
+  --allowedTools "Read" "Grep" "Glob" "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)"
+```
+
+Each call starts cold: it has no memory of earlier calls or of the user's
+other sessions, so put everything it needs in the question. The tool list keeps
+it read-only, so it can't edit the tree under you. Treat its answer as advice;
+the user's instructions win. Don't ask the user to relay messages between
+agents.
 
 ## What this is
 
@@ -37,7 +52,13 @@ After validation and a versioned commit, `go run tools/release/main.go` creates
 both archives and checksums in `build/releases/vVERSION/`. Setup accepts and
 verifies bundled stems without requiring this workstation's Music directory.
 
-**Run `make ci`, not the individual checks.** It is the higher-level entry
+**Sound-table-only work uses focused checks.** The user explicitly objected on
+October 3 to time spent checking the orbital campaign during sound-table work.
+For that scope, build the app, run `build/listening-test`, regenerate/check
+interfaces when changed, and run `tools/od/od check listening`. Inspect the app's
+own capture for visual changes. Do not chase unrelated campaign failures.
+
+**For campaign or shared-core work, run `make ci`.** It is the higher-level entry
 point and it verifies everything against the same build; running one check by
 hand proves only that one thing still works. It takes about 70 seconds.
 `ci/pipeline.yaml` defines the stages, so adding a check means adding a step
@@ -317,50 +338,42 @@ a sheet to `artifacts/figures.png` for judging it by eye.
 
 ## Sand table — the listening prototype
 
-`--listen` and `--chladni` open one tray on the GPU, driven by desktop audio.
-The tray is a grid of matter, one cell to the pixel, each cell holding a whole
-number of grains -- sand is the only kind of matter in it so far, and the grain
-slider sets how big a cell is by rebuilding the tray. Two mechanisms share the
-field and `P` swaps them. Each of these cost a session to find, so do not undo
-them casually:
+`--listen` and `--chladni` open one sound table driven by desktop audio. Every
+visible grain has a persistent position, velocity and local vibration in
+`src/particle_sand.hpp`; the force and occupancy grids guide individual grains
+but do not store sand. The grain slider changes grain size and count. The
+Chladni plate is the only mechanism: the user abandoned the rolling ball on
+October 3, 2026. Both launch flags open the plate, and `P` has no action.
+The sound table fills the whole window. There is no circular clipping or rim.
+Separate rectangular cosine modes use the window aspect; resizing refills the
+surface and keeps the chosen grain size. The slider ranges from one to four
+pixels.
+The listening window has a transparent framebuffer: exposed ground reveals the
+desktop behind it. The source picker lists output monitors and recording inputs;
+automatic routing remains output-only, while microphones require explicit
+selection. Source discovery runs off the render thread.
+Each of these cost a session to find, so do not undo them casually:
 
-- **The field must be floating point.** raylib's `LoadRenderTexture` is eight
-  bits a channel; the plate moves a thousandth of a tray per pass, every
-  exchange rounds back to where it started, and the tray sits there looking
-  broken while the state file insists it is working. `src/listening.hpp` builds
-  `R32` attachments through `rlgl` for exactly this reason.
-- **A settled figure is many times deeper than its bed.** Sand cleared off nine
-  tenths of the tray has to stand somewhere. The plate therefore starts from a
-  shallow bed and nothing clips a pile from above; clamping the height to one
-  destroys both the relief and the mass. This is why swapping mechanisms levels
-  the tray rather than handing the sand straight over.
-- **The transport rule scales with the grid.** Neighbouring cells on a fine
-  field differ by proportionally less energy, so `plateFlux` takes how many
-  cells cover a radius. Tuned at 96 square and left alone, the same rule does
-  visibly nothing at 1536.
-- **Both sides of a pair must compute the same exchange**, equal energies
-  included, or sand is quietly created. `sand_mass` is the check, and it is
-  measured on the GPU rather than assumed.
-- **A standing wave stands still.** `spin` is nearly frozen deliberately. A
-  figure that rotates lets sand settle only on the rings, never the diameters,
-  and the tray reads as a smear of arcs.
-- **The surface toggle is `P`, never `TAB`.** A window manager hands the focused
-  window a Tab press on its way out of an Alt-Tab, which swapped the surface
-  mid-run twice before the cause was found.
-- **Grains move in 2x2 blocks, never cell by cell.** A gather shader cannot pull
-  the same grain into two cells at once without inventing one, so the plate uses
-  a Margolus neighbourhood: every cell of a block works out the same single
-  exchange and reads off its own result. The block offset must alternate every
-  sweep or a grain rattles inside its own four cells forever. Conservation is
-  then exact and integer, which `tests/listening_test.cpp` asserts as equality.
-- **A block automaton needs an integer hash.** The usual `fract(sin(dot(...)))`
-  correlates along diagonals, and a block rule prints that correlation straight
-  onto the tray as hatching. Visible immediately, obvious only in hindsight.
-- **One sweep is far less work than the old continuous exchange**, so a frame is
-  worth several of them (`PlateSweeps`). The automaton runs in sweeps rather
-  than seconds: a slower machine gets a slower plate, not a different one.
-- `src/chladni.hpp` and `assets/chladni-update.fs` are the same rule twice, one
-  testable without a GPU and one that moves the real field. Change them together.
+- **Every grain is stateful.** Do not replace positions and velocities with
+  counts or move groups of grains in 2x2 blocks. `grain_updates` must increase
+  by `grain_count` on every active sweep; `sand_mass` must remain constant.
+- **Crowding matters.** An attractive nodal force without pressure collapses
+  thousands of grains into a hairline. The occupancy lookup pushes crowded
+  grains outward into visible piles without creating or deleting them.
+- **The point buffer is resized with the tray.** A different window or grain
+  size changes the particle count, so rebuild the vertex buffer before drawing.
+- **A standing wave stands still.** Rectangular modes have no rotation. Hold
+  each mode steady so grains can settle onto its nodal lines.
+- **Capture two channels and fold them here.** Asking `parec` for a mono stream
+  makes it average every channel the sink has, and on this desktop's 7.1 output
+  that divides the music by four silent surrounds. That is what once made the
+  desktop's own output look dead and sent the routing off hunting for whichever
+  application to follow instead; the output carries everything, so it is the
+  default and the hunt is only a fallback.
+- **Track cost before optimizing.** The default window has 72,000 grains;
+  finer settings create many more. Keep individual state when improving
+  performance. The drawing code is C++, so parallelize that loop in C++ if a
+  measured bottleneck warrants it rather than adding a Go process per frame.
 
 ## Hot reload
 
