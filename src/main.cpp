@@ -11,6 +11,7 @@
 #include <GL/gl.h>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -122,6 +123,10 @@ struct Options {
     fs::path progressFile;   // set once the campaign is known: one save per campaign
     bool windowed=false,check=false,resume=false,gallery=false,dev=false,listen=false;
     std::string monitor="auto";
+    fs::path tokenFeed=[] {
+        const char* home=std::getenv("HOME");
+        return home?fs::path(home)/".local/state/agent-bridge/token-feed.tsv":fs::path{};
+    }();
     int world=-1;
     double captureAfter=2;
     double seconds=0;
@@ -149,7 +154,7 @@ static void writeState(const Options& options,const Mixer& mixer,const std::stri
     fs::create_directories(options.state.parent_path());
     auto temp=options.state;temp+=".tmp";
     std::ofstream out(temp);
-    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.25.0\",\"running\":"<<(running?"true":"false")
+    out<<"{\n  \"app\":\"orbital-drift\",\"version\":\"0.26.0\",\"running\":"<<(running?"true":"false")
        <<",\"renderer\":"<<quote(gpu)<<",\"vendor\":"<<quote(vendor)<<",\"hardware_accelerated\":true"
        <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")
        <<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()<<",\"fps\":"<<GetFPS()
@@ -201,6 +206,7 @@ int main(int argc,char** argv) {
             else if(arg=="--dev")options.dev=true;
             else if(arg=="--listen")options.listen=true;
             else if(arg=="--chladni")options.listen=true;
+            else if(arg=="--token-feed")options.tokenFeed=value();
             else if(arg=="--monitor")options.monitor=value();
             else if(arg=="--campaign")options.campaignFile=fs::absolute(value());
             else if(arg=="--world")options.world=std::stoi(value());
@@ -210,10 +216,11 @@ int main(int argc,char** argv) {
             else if(arg=="--capture")options.capture=fs::absolute(value());
             else if(arg=="--seconds")options.seconds=std::stod(value());
             else if(arg=="--help") {
-                std::cout<<"Orbital Drift 0.25.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
+                std::cout<<"Orbital Drift 0.26.0\nDefault: fullscreen, silent, one track unsealed.\n--dev adds G: jump straight to the target.\nLeft-click cards/orbs or 1-7 toggle; right-click a sigil to unseal the next track.\nSpace pause; M all off/on; A all on; +/- volume; F11 fullscreen; Esc exit.\n"
                          <<"Options: --windowed --seconds N --capture file.png --state file.json --assets directory --check-assets --resume --gallery --dev --world N --campaign file.conf --capture-after SECONDS\n"
                          <<"--listen opens the GPU sand table; S selects an audio source, or --monitor NAME chooses one at launch.\n"
-                         <<"--chladni is an alias for --listen: the sound-driven Chladni sand table.\n";return 0;
+                         <<"--chladni is an alias for --listen: the sound-driven Chladni sand table.\n"
+                         <<"--token-feed FILE reads agent-bridge token totals for colored sand.\n";return 0;
             } else throw std::runtime_error("Unknown argument: "+arg);
         }
         if(options.listen)return runListening(options);

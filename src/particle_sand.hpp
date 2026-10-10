@@ -5,8 +5,10 @@
 #include "chladni.hpp"
 
 namespace orbital {
+enum class SandOrigin : uint8_t { Mouse, Codex, Claude };
 struct SandGrain {
     float x=0,y=0,vx=0,vy=0,activity=0;
+    SandOrigin origin=SandOrigin::Mouse;
     bool operator==(const SandGrain&) const = default;
 };
 
@@ -16,6 +18,7 @@ class ParticleSand {
     std::vector<unsigned> occupancy;
     PlateMode lastMode{},lastCompanion{};
     float lastWeight=-1;
+    size_t nextReplace=0;
     static uint32_t scramble(uint32_t x) {
         x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;return x;
     }
@@ -43,12 +46,30 @@ public:
     void reset(int w,int h) {
         width=w;height=h;grains.clear();grains.reserve(size_t(w)*h);
         force.assign(size_t(w)*h,{});occupancy.assign(size_t(w)*h,0);
-        lastWeight=-1;sweeps=grainUpdates=0;moving=0;spread=0;
+        lastWeight=-1;nextReplace=0;sweeps=grainUpdates=0;moving=0;spread=0;
     }
-    bool add(float x,float y) {
+    bool add(float x,float y,SandOrigin origin=SandOrigin::Mouse) {
         if(width<1||height<1||grains.size()>=size_t(width)*height)return false;
-        grains.push_back({std::clamp(x,.5f,width-.5f),std::clamp(y,.5f,height-.5f),0,0,0});
+        grains.push_back({std::clamp(x,.5f,width-.5f),std::clamp(y,.5f,height-.5f),0,0,0,origin});
         return true;
+    }
+    SandOrigin replaceOldest(float x,float y,SandOrigin origin,bool spareMouse=false) {
+        // AI sources recycle their own older grains first, preserving the
+        // other source's color and hand-placed sand. Bound the scan for speed.
+        size_t chosen=nextReplace,limit=std::min(size_t(64),grains.size());
+        bool found=false;
+        if(origin!=SandOrigin::Mouse)for(size_t i=0;i<limit;++i) {
+            size_t slot=(nextReplace+i)%grains.size();
+            if(grains[slot].origin==origin){chosen=slot;found=true;break;}
+        }
+        if(!found&&spareMouse)for(size_t i=0;i<limit;++i) {
+            size_t slot=(nextReplace+i)%grains.size();
+            if(grains[slot].origin!=SandOrigin::Mouse){chosen=slot;break;}
+        }
+        SandOrigin previous=grains[chosen].origin;
+        grains[chosen]={std::clamp(x,.5f,width-.5f),std::clamp(y,.5f,height-.5f),0,0,0,origin};
+        nextReplace=(chosen+1)%grains.size();
+        return previous;
     }
     void update(const PlateDriver& plate,float dt) {
         if(plate.paused||plate.agitation<=0||dt<=0)return;
@@ -100,11 +121,12 @@ public:
         spread=float(std::sqrt(std::max(0.0,squares/occupancy.size()-mean*mean)));
     }
     void vertices(std::vector<float>& out,float pixelsX,float pixelsY) const {
-        out.resize(grains.size()*3);
+        out.resize(grains.size()*4);
         float sx=pixelsX/width,sy=pixelsY/height;
         for(size_t i=0;i<grains.size();++i) {
-            out[i*3]=grains[i].x*sx;out[i*3+1]=grains[i].y*sy;
-            out[i*3+2]=grains[i].activity;
+            out[i*4]=grains[i].x*sx;out[i*4+1]=grains[i].y*sy;
+            out[i*4+2]=grains[i].activity;
+            out[i*4+3]=float(grains[i].origin);
         }
     }
 };

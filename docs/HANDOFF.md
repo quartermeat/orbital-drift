@@ -1,5 +1,11 @@
 # Session handoff — September 20, 2026
 
+## Agent token sand (integration branch)
+
+Branch `codex/token-sand` in `/home/quartermeat/worktrees/orbital-drift-token-sand` adds colored sound-table grains from `agent-bridge-monitor.service`. The daemon side is branch `codex/token-sand` in `/home/quartermeat/worktrees/agent-bridge-token-sand`; its installed binary is already publishing private `token-feed.tsv`. The table reads that file, baselines existing totals, then creates one cyan Codex or violet Claude grain for each new input or output token; mouse grains remain warm gold. When the tray fills, it replaces older grains and counts replacements. The desktop table runs from this worktree in dev mode.
+
+Verification passed: `go test ./...` for the bridge and `make ci` for Orbital Drift, including the live listening check. The live capture in this worktree's `artifacts/sound-table.png` was inspected and showed all three colors. The main Orbital Drift worktree has separate uncommitted v0.25.1 work; integrate that patch before this feature. This branch includes the delayed-grain-burst fix in `src/listening.hpp` so its live desktop does not regress while integration is pending.
+
 ## Update — October 4: empty sound table and v0.25.0
 
 The table now starts with zero grains. Holding left click on the tray places a

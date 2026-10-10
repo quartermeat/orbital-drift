@@ -96,22 +96,31 @@ type ListeningState struct {
 	Clarity    float64 `json:"clarity"`
 
 	// The sound table; Surface is always "plate".
-	Surface        string  `json:"surface"`
-	FieldWidth     int     `json:"field_width"`
-	FieldHeight    int     `json:"field_height"`
-	GPURelief      bool    `json:"gpu_relief"`
-	SandMass       float64 `json:"sand_mass"`
-	SandSpread     float64 `json:"sand_spread"`
-	Bed            float64 `json:"bed"`
-	Paused         bool    `json:"paused"`
-	Clears         int     `json:"clears"`
-	Strokes        uint64  `json:"strokes"`
-	Sweeps         uint64  `json:"sweeps"`
-	GrainPx        float64 `json:"grain_px"`
-	StatefulGrains bool    `json:"stateful_grains"`
-	GrainCount     uint64  `json:"grain_count"`
-	MovingGrains   uint64  `json:"moving_grains"`
-	GrainUpdates   uint64  `json:"grain_updates"`
+	Surface             string  `json:"surface"`
+	FieldWidth          int     `json:"field_width"`
+	FieldHeight         int     `json:"field_height"`
+	GPURelief           bool    `json:"gpu_relief"`
+	SandMass            float64 `json:"sand_mass"`
+	SandSpread          float64 `json:"sand_spread"`
+	Bed                 float64 `json:"bed"`
+	Paused              bool    `json:"paused"`
+	Clears              int     `json:"clears"`
+	Strokes             uint64  `json:"strokes"`
+	Sweeps              uint64  `json:"sweeps"`
+	GrainPx             float64 `json:"grain_px"`
+	StatefulGrains      bool    `json:"stateful_grains"`
+	GrainCount          uint64  `json:"grain_count"`
+	MouseGrains         uint64  `json:"mouse_grains"`
+	CodexGrains         uint64  `json:"codex_grains"`
+	ClaudeGrains        uint64  `json:"claude_grains"`
+	TokenFeedConnected  bool    `json:"token_feed_connected"`
+	CodexTokensSeen     uint64  `json:"codex_tokens_seen"`
+	ClaudeTokensSeen    uint64  `json:"claude_tokens_seen"`
+	PendingCodexGrains  uint64  `json:"pending_codex_grains"`
+	PendingClaudeGrains uint64  `json:"pending_claude_grains"`
+	RecycledGrains      uint64  `json:"recycled_grains"`
+	MovingGrains        uint64  `json:"moving_grains"`
+	GrainUpdates        uint64  `json:"grain_updates"`
 
 	// The shaking plate.
 	ModeN         int     `json:"mode_n"`

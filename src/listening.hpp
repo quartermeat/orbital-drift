@@ -3,6 +3,7 @@
 // A Chladni plate shakes sand into the still lines of whatever is playing.
 #include "desktop_monitor.hpp"
 #include "particle_sand.hpp"
+#include "token_feed.hpp"
 #include <future>
 
 static int runListening(const Options& options) {
@@ -37,16 +38,24 @@ static int runListening(const Options& options) {
         int grainChoice=GrainChoices-1,fieldWidth=0,fieldHeight=0;
         auto gridExtent=[&](int pixels){return std::max(2,int(std::ceil(pixels/GrainSteps[grainChoice])));};
         ParticleSand sand;
+        TokenFeedReader tokenFeed(options.tokenFeed);
+        uint64_t mouseGrains=0,claudeGrains=0,codexGrains=0;
+        uint64_t pendingClaude=0,pendingCodex=0,recycledGrains=0,seenClaude=0,seenCodex=0;
+        uint32_t placementSeed=0x51a7e5u;
         uint64_t strokes=0;int clears=0;
-        auto clear=[&](){sand.reset(fieldWidth,fieldHeight);};
+        auto clear=[&](bool discardPending){
+            sand.reset(fieldWidth,fieldHeight);
+            mouseGrains=claudeGrains=codexGrains=recycledGrains=0;
+            if(discardPending)pendingClaude=pendingCodex=0;
+        };
         auto buildTray=[&]() {
             fieldWidth=gridExtent(GetScreenWidth());fieldHeight=gridExtent(GetScreenHeight());
-            clear();
+            clear(false);
             if(grainVbo)rlUnloadVertexBuffer(grainVbo);
-            grainVbo=rlLoadVertexBuffer(nullptr,int(size_t(fieldWidth)*fieldHeight*3*sizeof(float)),true);
+            grainVbo=rlLoadVertexBuffer(nullptr,int(size_t(fieldWidth)*fieldHeight*4*sizeof(float)),true);
             if(!grainVbo)throw std::runtime_error("Cannot create grain vertex buffer");
             rlEnableVertexArray(grainVao);rlEnableVertexBuffer(grainVbo);
-            rlSetVertexAttribute(0,3,RL_FLOAT,false,3*sizeof(float),0);
+            rlSetVertexAttribute(0,4,RL_FLOAT,false,4*sizeof(float),0);
             rlEnableVertexAttribute(0);
             rlDisableVertexBuffer();rlDisableVertexArray();
         };
@@ -61,7 +70,7 @@ static int runListening(const Options& options) {
             sand.measure();sandSpread=sand.spread;
             sandMass=float(sand.grains.size())/float(fieldWidth*fieldHeight);
         };
-        double started=GetTime(),lastData=started,lastState=0,lastRoute=started,lastTouch=started,lastMass=0;
+        double started=GetTime(),lastData=started,lastState=0,lastRoute=started,lastTouch=started,lastMass=0,lastTokens=started-1;
         double lastSound=started;
         std::future<std::string> routeQuery;
         bool captured=false,showHelp=true,draggingGrain=false,sourcesOpen=false,placing=false;
@@ -81,7 +90,7 @@ static int runListening(const Options& options) {
         auto write=[&](bool running) {
             fs::create_directories(options.state.parent_path());auto temp=options.state;temp+=".tmp";
             std::ofstream out(temp);const auto& f=monitor.analysis.value;
-            out<<"{\"app\":\"orbital-drift\",\"version\":\"0.25.0\",\"mode\":\"listening\",\"running\":"<<(running?"true":"false")
+            out<<"{\"app\":\"orbital-drift\",\"version\":\"0.26.0\",\"mode\":\"listening\",\"running\":"<<(running?"true":"false")
                <<",\"renderer\":"<<quote(gpu)<<",\"hardware_accelerated\":true,\"fps\":"<<GetFPS()
                <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")<<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()
                <<",\"transparent_background\":true"
@@ -100,6 +109,11 @@ static int runListening(const Options& options) {
                <<",\"grain_px\":"<<float(GetScreenWidth())/fieldWidth
                <<",\"gpu_relief\":true,\"sand_mass\":"<<sandMass<<",\"sand_spread\":"<<sandSpread
                <<",\"bed\":0,\"stateful_grains\":true,\"grain_count\":"<<sand.grains.size()
+               <<",\"mouse_grains\":"<<mouseGrains<<",\"codex_grains\":"<<codexGrains<<",\"claude_grains\":"<<claudeGrains
+               <<",\"token_feed_connected\":"<<(tokenFeed.connected?"true":"false")
+               <<",\"codex_tokens_seen\":"<<seenCodex<<",\"claude_tokens_seen\":"<<seenClaude
+               <<",\"pending_codex_grains\":"<<pendingCodex<<",\"pending_claude_grains\":"<<pendingClaude
+               <<",\"recycled_grains\":"<<recycledGrains
                <<",\"moving_grains\":"<<sand.moving<<",\"grain_updates\":"<<sand.grainUpdates
                <<",\"paused\":"<<(paused?"true":"false")<<",\"clears\":"<<clears
                <<",\"strokes\":"<<strokes<<",\"sweeps\":"<<sand.sweeps
@@ -150,7 +164,7 @@ static int runListening(const Options& options) {
                 monitor.analysis.value={};monitor.analysis.value.frames=frames;monitor.analysis.value.onsets=onsets;
             }
             if(IsKeyPressed(KEY_C)||IsKeyPressed(KEY_BACKSPACE)) {
-                clear();plate.clear();strokes=0;++clears;lastTouch=now;lastMass=0;
+                clear(true);plate.clear();strokes=0;++clears;lastTouch=now;lastMass=0;
             }
             if(IsKeyPressed(KEY_SPACE)){paused=!paused;lastTouch=now;}
             if(IsKeyPressed(KEY_H))showHelp=!showHelp;
@@ -202,9 +216,44 @@ static int runListening(const Options& options) {
             }
             if(!IsMouseButtonDown(MOUSE_BUTTON_LEFT))placing=false;
             if(placing&&inside) {
+                // A long frame or time outside the window must not bank grains
+                // to be released as a burst on the next visible frame.
+                if(now-nextGrain>.1)nextGrain=now;
                 for(int added=0;now>=nextGrain&&added<8;++added,nextGrain+=.02) {
-                    if(!sand.add(at.x*fieldWidth/GetScreenWidth(),at.y*fieldHeight/GetScreenHeight()))break;
+                    float x=at.x*fieldWidth/GetScreenWidth(),y=at.y*fieldHeight/GetScreenHeight();
+                    if(!sand.add(x,y)) {
+                        SandOrigin prior=sand.replaceOldest(x,y,SandOrigin::Mouse);
+                        if(prior==SandOrigin::Mouse)--mouseGrains;
+                        else if(prior==SandOrigin::Claude)--claudeGrains;
+                        else --codexGrains;
+                        ++recycledGrains;
+                    }
+                    ++mouseGrains;
                 }
+            } else if(placing)nextGrain=now;
+            if(now-lastTokens>=.25) {
+                TokenDelta delta=tokenFeed.poll();lastTokens=now;
+                seenClaude+=delta.claude;seenCodex+=delta.codex;
+                pendingClaude+=delta.claude;pendingCodex+=delta.codex;
+            }
+            // Spread token bursts over frames. One accepted token becomes one
+            // individually simulated grain; color travels with the grain.
+            for(int added=0;added<1200&&(pendingClaude||pendingCodex);++added) {
+                bool claude=pendingClaude>0&&(pendingCodex==0||added%2==0);
+                if(claude)--pendingClaude;else --pendingCodex;
+                placementSeed=placementSeed*1664525u+1013904223u;
+                float x=(.02f+.96f*float(placementSeed&0xffffu)/65535.f)*fieldWidth;
+                placementSeed=placementSeed*1664525u+1013904223u;
+                float y=(.02f+.96f*float(placementSeed&0xffffu)/65535.f)*fieldHeight;
+                SandOrigin origin=claude?SandOrigin::Claude:SandOrigin::Codex;
+                if(!sand.add(x,y,origin)) {
+                    SandOrigin prior=sand.replaceOldest(x,y,origin,true);
+                    if(prior==SandOrigin::Mouse)--mouseGrains;
+                    else if(prior==SandOrigin::Claude)--claudeGrains;
+                    else --codexGrains;
+                    ++recycledGrains;
+                }
+                if(claude)++claudeGrains;else ++codexGrains;
             }
             float wheel=GetMouseWheelMove();
             Rectangle button=sourceButton();Vector2 pointer=GetMousePosition();
@@ -250,6 +299,7 @@ static int runListening(const Options& options) {
                 if(monitor.connected&&f.rms>.0001f)
                     status=TextFormat("%s   %.0f Hz",condition,double(f.toneHz));
                 label(status,32*ui,51*ui,14*ui);
+                label("SAND: YOU GOLD  /  CODEX CYAN  /  CLAUDE VIOLET",32*ui,76*ui,12*ui);
                 // Grain slider: one pixel on the left, coarser to the right.
                 Rectangle track=grainTrack();
                 DrawRectangleRec({track.x,track.y,track.width,track.height},Fade(ink,.22f));

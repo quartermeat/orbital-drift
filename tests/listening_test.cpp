@@ -2,6 +2,8 @@
 #include "desktop_monitor.hpp"
 #include "chladni.hpp"
 #include "particle_sand.hpp"
+#include "token_feed.hpp"
+#include <fstream>
 #include <numeric>
 #include <vector>
 #include <cassert>
@@ -123,6 +125,43 @@ int main() {
     assert(tray.grains==heldGrains&&tray.grainUpdates==grainCount*300);
     tray.reset(97,63);
     tray.measure();assert(tray.grains.empty()&&tray.spread==0);
+
+    ParticleSand colors;colors.reset(4,4);
+    assert(colors.add(1,1,SandOrigin::Mouse));
+    assert(colors.add(2,2,SandOrigin::Codex));
+    assert(colors.add(3,3,SandOrigin::Claude));
+    std::vector<float> colored;colors.vertices(colored,4,4);
+    assert(colored.size()==12&&colored[3]==0&&colored[7]==1&&colored[11]==2);
+    ParticleSand full;full.reset(1,1);
+    assert(full.add(.5,.5,SandOrigin::Mouse));
+    assert(!full.add(.5,.5,SandOrigin::Claude));
+    assert(full.replaceOldest(.5,.5,SandOrigin::Codex)==SandOrigin::Mouse);
+    assert(full.grains.size()==1&&full.grains[0].origin==SandOrigin::Codex);
+    ParticleSand mixed;mixed.reset(2,1);
+    assert(mixed.add(.5,.5,SandOrigin::Mouse));
+    assert(mixed.add(1.5,.5,SandOrigin::Codex));
+    assert(mixed.replaceOldest(.5,.5,SandOrigin::Claude,true)==SandOrigin::Codex);
+    assert(mixed.grains[0].origin==SandOrigin::Mouse);
+    ParticleSand providers;providers.reset(2,1);
+    assert(providers.add(.5,.5,SandOrigin::Claude));
+    assert(providers.add(1.5,.5,SandOrigin::Codex));
+    assert(providers.replaceOldest(.5,.5,SandOrigin::Codex,true)==SandOrigin::Codex);
+    assert(providers.grains[0].origin==SandOrigin::Claude);
+
+    auto feedPath=std::filesystem::temp_directory_path()/"orbital-drift-token-feed-test.tsv";
+    auto writeFeed=[&](uint64_t claude,uint64_t codex) {
+        std::ofstream file(feedPath,std::ios::trunc);
+        file<<"agent-bridge-token-feed\t1\nsampled_at\t2026-10-10T20:00:00Z\nclaude\t"<<claude<<"\ncodex\t"<<codex<<'\n';
+    };
+    writeFeed(100,200);
+    TokenFeedReader feed(feedPath);
+    auto delta=feed.poll();assert(feed.connected&&delta.claude==0&&delta.codex==0);
+    writeFeed(105,207);
+    delta=feed.poll();assert(delta.claude==5&&delta.codex==7);
+    delta=feed.poll();assert(delta.claude==0&&delta.codex==0);
+    writeFeed(2,1);
+    delta=feed.poll();assert(delta.claude==0&&delta.codex==0);
+    std::filesystem::remove(feedPath);
 
     // Routing follows what is sounding now, not what opened a stream first.
     const char* sinks="58\tspeakers\tPipeWire\n131\teasyeffects_sink\tPipeWire\n";

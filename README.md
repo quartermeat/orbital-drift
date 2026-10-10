@@ -89,6 +89,15 @@ The sound table starts empty. Hold left click over the window to place one
 grain immediately and another every 20 ms while held. The background is
 transparent, so empty areas reveal the desktop behind the window.
 
+With the local `agent-bridge-monitor.service` running, the table also places
+one grain for each new Claude or Codex input or output token reported while the
+table is open. Mouse grains are warm gold, Codex grains cyan, and Claude grains
+violet. The first feed read establishes a baseline, so earlier session totals
+do not fill the tray. Token bursts are spread across frames. When the tray is
+full, new tokens replace its oldest grains; `recycled_grains` counts replacements.
+The state also reports pending grains. Use
+`--token-feed FILE` to read another feed, or `--token-feed none` to disable it.
+
 **The plate** is the tray itself shaking. A few seconds of the music's measured
 pitch select a standing-wave approximation for this window's width and height.
 Lower pitches select broad figures and higher pitches select finer ones. The

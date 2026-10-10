@@ -88,6 +88,15 @@ with nontrivial speed, and `grain_updates` the total individual updates.
 `paused` is the space bar, `clears` counts emptyings from `C`, and `strokes`
 and `sweeps` count active frames and full passes over all grains.
 
+The optional agent-bridge feed adds one grain for each new input or output
+token after the table's first read. `mouse_grains`, `codex_grains`, and
+`claude_grains` count the origins currently on the tray; the shader colors them
+gold, cyan, and violet. `token_feed_connected` shows whether the feed can be
+read. `codex_tokens_seen` and `claude_tokens_seen` are totals observed since
+launch. `pending_*_grains` are accepted tokens still waiting to be placed,
+and `recycled_grains` counts old grains replaced after the tray fills. Every
+observed token is still placed as a grain; older grains leave to make room.
+
 - `sand_mass` is the exact particle count divided by the tray's cell count; it
   rises when the user places sand and otherwise remains constant. `sand_spread` is
   the standard deviation of per-cell occupancy, measured from every grain every

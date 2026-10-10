@@ -36,7 +36,20 @@ func checkListening(root string) int {
 	}
 	capture := filepath.Join(root, "artifacts", "sound-table.png")
 	_ = os.Remove(capture)
-	app, err := Launch(root, "listening", "--listen", "--dev", "--monitor", sink+".monitor", "--capture", capture, "--capture-after", "0.5")
+	feedPath := filepath.Join(root, "artifacts", "test-token-feed.tsv")
+	if err := os.MkdirAll(filepath.Dir(feedPath), 0700); err != nil {
+		fmt.Println("FAIL: cannot create token feed directory:", err)
+		return 1
+	}
+	writeFeed := func(claude, codex int) error {
+		return os.WriteFile(feedPath, []byte(fmt.Sprintf("agent-bridge-token-feed\t1\nsampled_at\t2026-10-10T20:00:00Z\nclaude\t%d\ncodex\t%d\n", claude, codex)), 0600)
+	}
+	if err := writeFeed(0, 0); err != nil {
+		fmt.Println("FAIL: cannot create token feed:", err)
+		return 1
+	}
+	defer os.Remove(feedPath)
+	app, err := Launch(root, "listening", "--listen", "--dev", "--monitor", sink+".monitor", "--token-feed", feedPath, "--capture", capture, "--capture-after", "0.5")
 	if err != nil {
 		fmt.Println("FAIL:", err)
 		return 1
@@ -140,6 +153,17 @@ func checkListening(root string) int {
 	if still := app.State().Listening; still == nil || still.GrainCount != placed.GrainCount {
 		app.Fail("sand kept appearing after the mouse button was released")
 	}
+	expected := placed
+	if err := writeFeed(7, 11); err != nil {
+		app.Fail("cannot update token feed: %v", err)
+	} else {
+		fed := waitFor(4*time.Second, func(l *ListeningState) bool { return l.ClaudeGrains == 7 && l.CodexGrains == 11 })
+		if fed == nil || fed.GrainCount != placed.GrainCount+18 || fed.MouseGrains != placed.GrainCount || fed.RecycledGrains != 0 {
+			app.Fail("token usage did not add exactly colored Claude/Codex grains (state %+v)", fed)
+		} else {
+			expected = fed
+		}
+	}
 
 	low := tone(70, func(l *ListeningState) bool { return l.Bass > l.Air*3 })
 	if low == nil || !low.Connected || low.RMS < .001 || low.Bass <= low.Air*3 {
@@ -172,6 +196,7 @@ func checkListening(root string) int {
 	}
 	if plate.FieldWidth != quiet.FieldWidth || plate.FieldHeight != quiet.FieldHeight {
 		placed = place()
+		expected = placed
 	}
 	// A window-manager resize legitimately clears the tray. If one happens
 	// during this tone, place fresh grains in the new tray and try it once more.
@@ -192,8 +217,8 @@ func checkListening(root string) int {
 		app.Fail("a steady tone did not shake the plate")
 		return app.Report("sand table")
 	}
-	if shaken.FieldWidth != placed.FieldWidth || shaken.FieldHeight != placed.FieldHeight ||
-		shaken.GrainCount != placed.GrainCount || shaken.GrainUpdates == 0 || shaken.MovingGrains == 0 {
+	if shaken.FieldWidth != expected.FieldWidth || shaken.FieldHeight != expected.FieldHeight ||
+		shaken.GrainCount != expected.GrainCount || shaken.GrainUpdates == 0 || shaken.MovingGrains == 0 {
 		app.Fail("not every grain received its own motion update")
 	}
 	if math.Abs(shaken.ToneHz-300) > 36 || shaken.Clarity < .6 {
@@ -202,8 +227,8 @@ func checkListening(root string) int {
 	if shaken.ModeN == 0 && shaken.ModeM == 0 || shaken.ModeFrequency < .5 {
 		app.Fail("the tone chose no rectangular plate mode (%d,%d)", shaken.ModeN, shaken.ModeM)
 	}
-	if math.Abs(shaken.SandMass-placed.SandMass) > .0001 {
-		app.Fail("the plate did not conserve the placed sand (%.5f against %.5f)", shaken.SandMass, placed.SandMass)
+	if math.Abs(shaken.SandMass-expected.SandMass) > .0001 {
+		app.Fail("the plate did not conserve the placed sand (%.5f against %.5f)", shaken.SandMass, expected.SandMass)
 	}
 
 	stop := play(1500, 8)
