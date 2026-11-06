@@ -131,6 +131,8 @@ type App struct {
 	logPath   string
 	window    string
 	lostFocus bool
+	X         int
+	Y         int
 	Width     int
 	Height    int
 	failures  []string
@@ -187,7 +189,8 @@ func Launch(root, name string, args ...string) (*App, error) {
 		return nil, fmt.Errorf("window never appeared (see %s)", app.logPath)
 	}
 	if name == "listening" {
-		_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+		app.RefreshSize()
+		app.ParkOutside()
 	}
 	app.focus()
 	time.Sleep(600 * time.Millisecond) // settle focus before the first input
@@ -196,7 +199,7 @@ func Launch(root, name string, args ...string) (*App, error) {
 	// a held button as a synthesized click, and a pointer left sitting over an
 	// orbit node turns the next keystroke into a descent.
 	if name == "listening" {
-		_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+		app.ParkOutside()
 	} else {
 		_ = xdo("mousemove", "--window", app.window, "6", "6")
 	}
@@ -215,10 +218,34 @@ func (a *App) RefreshSize() {
 		}
 		value, _ := strconv.Atoi(parts[1])
 		switch parts[0] {
+		case "X":
+			a.X = value
+		case "Y":
+			a.Y = value
 		case "WIDTH":
 			a.Width = value
 		case "HEIGHT":
 			a.Height = value
+		}
+	}
+}
+
+// Put the pointer at a desktop corner outside this window. An off-window
+// coordinate passed with --window can be clipped back onto the tray by X11.
+func (a *App) ParkOutside() {
+	a.RefreshSize()
+	display, err := xdoOut("getdisplaygeometry")
+	if err != nil {
+		return
+	}
+	var width, height int
+	if _, err := fmt.Sscan(display, &width, &height); err != nil {
+		return
+	}
+	for _, at := range [][2]int{{0, 0}, {width - 1, 0}, {0, height - 1}, {width - 1, height - 1}} {
+		if at[0] < a.X || at[0] >= a.X+a.Width || at[1] < a.Y || at[1] >= a.Y+a.Height {
+			_ = xdo("mousemove", strconv.Itoa(at[0]), strconv.Itoa(at[1]))
+			return
 		}
 	}
 }

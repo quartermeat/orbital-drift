@@ -3,6 +3,8 @@
 Applies to `/home/quartermeat/work/orbital-drift`. The home `AGENTS.md` still
 governs anything not covered here.
 
+**Open handed-off work: read [docs/TODO.md](docs/TODO.md) first.**
+
 Latest session handoff: [docs/HANDOFF.md](docs/HANDOFF.md). The source version is
 v0.25.0. Older milestone descriptions below are
 historical; consult the handoff, README, and current code for shipped behavior.
@@ -37,6 +39,14 @@ from the commit. Full `make ci` passed in 114 seconds after the live check was
 made resilient to a window-manager resize during the tone; recognition met its
 9-of-12 floor. `git diff --check` passed. Create the annotated `v0.25.0` tag
 with the versioned commit and push both. Do not add the garden header.
+
+## Update — October 4: stop delayed grain bursts
+
+After v0.25.0 was pushed, Claude Code's read-only review found that a held
+press could accumulate missed timer ticks while the pointer was outside the
+window, then add a burst on re-entry. Fix the placement timer, strengthen the
+live check for that gap and for per-grain updates and clear, then ship the
+routine patch as v0.25.1. Keep the untracked garden header out of the commit.
 
 **Consult Claude Code directly; don't pass notes.** More than one agent works
 in this tree (Claude Code and Codex). When a task needs a decision, context or a

@@ -102,7 +102,7 @@ func checkListening(root string) int {
 			}
 			time.Sleep(350 * time.Millisecond)
 			_ = xdo("mouseup", "1")
-			_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+			app.ParkOutside()
 			time.Sleep(350 * time.Millisecond)
 			result = app.State().Listening
 			if result != nil && result.GrainCount > 0 {
@@ -139,6 +139,32 @@ func checkListening(root string) int {
 	time.Sleep(250 * time.Millisecond)
 	if still := app.State().Listening; still == nil || still.GrainCount != placed.GrainCount {
 		app.Fail("sand kept appearing after the mouse button was released")
+	}
+	// Missed time outside the window must not pour out as a burst on re-entry.
+	app.RefreshSize()
+	app.Move(app.Width/2, app.Height/2)
+	beforeGap := app.State().Listening
+	_ = xdo("mousedown", "1")
+	time.Sleep(120 * time.Millisecond)
+	app.ParkOutside()
+	time.Sleep(750 * time.Millisecond)
+	_ = xdo("mousemove", "--window", app.window, fmt.Sprint(app.Width/2), fmt.Sprint(app.Height/2))
+	time.Sleep(100 * time.Millisecond)
+	_ = xdo("mouseup", "1")
+	app.ParkOutside()
+	time.Sleep(350 * time.Millisecond)
+	afterGap := app.State().Listening
+	if afterGap == nil {
+		app.Fail("placement state disappeared")
+		return app.Report("sand table")
+	}
+	if afterGap.FieldWidth == beforeGap.FieldWidth && afterGap.FieldHeight == beforeGap.FieldHeight &&
+		(afterGap.GrainCount < beforeGap.GrainCount || afterGap.GrainCount-beforeGap.GrainCount > 18) {
+		app.Fail("holding outside the table banked a burst of grains (%d to %d)", beforeGap.GrainCount, afterGap.GrainCount)
+	}
+	placed = afterGap
+	if placed.GrainCount == 0 {
+		placed = place() // the window manager may have resized during the gap
 	}
 
 	low := tone(70, func(l *ListeningState) bool { return l.Bass > l.Air*3 })
@@ -193,7 +219,8 @@ func checkListening(root string) int {
 		return app.Report("sand table")
 	}
 	if shaken.FieldWidth != placed.FieldWidth || shaken.FieldHeight != placed.FieldHeight ||
-		shaken.GrainCount != placed.GrainCount || shaken.GrainUpdates == 0 || shaken.MovingGrains == 0 {
+		shaken.GrainCount != placed.GrainCount || shaken.MovingGrains == 0 ||
+		shaken.GrainUpdates-placed.GrainUpdates != shaken.GrainCount*(shaken.Sweeps-placed.Sweeps) {
 		app.Fail("not every grain received its own motion update")
 	}
 	if math.Abs(shaken.ToneHz-300) > 36 || shaken.Clarity < .6 {
@@ -251,8 +278,10 @@ func checkListening(root string) int {
 		app.Fail("a rebuilt tray did not come back empty")
 	}
 
-	app.Click(1, app.Width/2, app.Height/2)
-	_ = xdo("mousemove", "--window", app.window, "-20", "-20")
+	toClear := place()
+	if toClear == nil || toClear.GrainCount == 0 {
+		app.Fail("cannot place a grain before clearing")
+	}
 	app.Key("c")
 	cleared := app.State().Listening
 	if cleared == nil || cleared.Clears != 1 || cleared.GrainCount != 0 || cleared.SandMass != 0 {

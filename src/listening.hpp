@@ -81,7 +81,7 @@ static int runListening(const Options& options) {
         auto write=[&](bool running) {
             fs::create_directories(options.state.parent_path());auto temp=options.state;temp+=".tmp";
             std::ofstream out(temp);const auto& f=monitor.analysis.value;
-            out<<"{\"app\":\"orbital-drift\",\"version\":\"0.25.0\",\"mode\":\"listening\",\"running\":"<<(running?"true":"false")
+            out<<"{\"app\":\"orbital-drift\",\"version\":\"0.25.1\",\"mode\":\"listening\",\"running\":"<<(running?"true":"false")
                <<",\"renderer\":"<<quote(gpu)<<",\"hardware_accelerated\":true,\"fps\":"<<GetFPS()
                <<",\"fullscreen\":"<<(IsWindowFullscreen()?"true":"false")<<",\"width\":"<<GetScreenWidth()<<",\"height\":"<<GetScreenHeight()
                <<",\"transparent_background\":true"
@@ -202,10 +202,13 @@ static int runListening(const Options& options) {
             }
             if(!IsMouseButtonDown(MOUSE_BUTTON_LEFT))placing=false;
             if(placing&&inside) {
+                // A long frame or time outside the window must not bank grains
+                // to be released as a burst on the next visible frame.
+                if(now-nextGrain>.1)nextGrain=now;
                 for(int added=0;now>=nextGrain&&added<8;++added,nextGrain+=.02) {
                     if(!sand.add(at.x*fieldWidth/GetScreenWidth(),at.y*fieldHeight/GetScreenHeight()))break;
                 }
-            }
+            } else if(placing)nextGrain=now;
             float wheel=GetMouseWheelMove();
             Rectangle button=sourceButton();Vector2 pointer=GetMousePosition();
             bool overSources=sourcesOpen&&pointer.x>=button.x&&pointer.x<=button.x+button.width
